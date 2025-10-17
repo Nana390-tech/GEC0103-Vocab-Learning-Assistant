@@ -342,7 +342,7 @@ const App: React.FC = () => {
       };
 
       try {
-        const vocabResponse = await ai.models.generateContent({
+        const vocabPromise = ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: `For the English word "${wordToLearn}", provide its most common meanings for an A2-level English language learner. For each meaning, provide a single Arabic word synonym, a more detailed Arabic explanation, and unique sentences for the example, the gap-fill quiz, and the multiple-choice quiz. If the word has multiple distinct meanings (e.g., as a noun and a verb), provide each one.`,
           config: {
@@ -350,6 +350,14 @@ const App: React.FC = () => {
             responseSchema: schema,
           },
         });
+
+        // Add a 30-second timeout to prevent stalling
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("The request took too long to respond. Please try again.")), 30000)
+        );
+        
+        const vocabResponse = await Promise.race([vocabPromise, timeoutPromise]);
+
         const responseText = vocabResponse.text;
         
         let parsedData;
@@ -405,11 +413,18 @@ const App: React.FC = () => {
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const spellCheckResponse = await ai.models.generateContent({
+      const spellCheckPromise = ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: `Is the English word "${wordToLearn}" spelled correctly? If it is correct, respond with only the word "correct". If it is misspelled, respond with only the single, most likely correct spelling.`,
       });
       
+      // Add a 10-second timeout to prevent stalling
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Spell check request timed out. Please try again.")), 10000)
+      );
+      
+      const spellCheckResponse = await Promise.race([spellCheckPromise, timeoutPromise]);
+
       const result = spellCheckResponse.text.trim().toLowerCase();
 
       // Sanity check: if response is weird (e.g., a sentence), ignore it and proceed.
