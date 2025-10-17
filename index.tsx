@@ -285,12 +285,8 @@ const App: React.FC = () => {
   }, [vocabList]);
 
   const fetchVocabData = async (wordToLearn: string) => {
-      setIsLoading(true);
       setError(null);
-      setSpellSuggestion(null);
-
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
       const schema = {
         type: Type.OBJECT,
         properties: {
@@ -350,14 +346,12 @@ const App: React.FC = () => {
             responseSchema: schema,
           },
         });
-
-        // Add a 30-second timeout to prevent stalling
+        
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("The request took too long to respond. Please try again.")), 30000)
         );
         
         const vocabResponse = await Promise.race([vocabPromise, timeoutPromise]);
-
         const responseText = vocabResponse.text;
         
         let parsedData;
@@ -379,13 +373,14 @@ const App: React.FC = () => {
           meanings: vocabData.meanings.map((m: Omit<Meaning, 'srs_level' | 'next_review_date'>) => ({
               ...m,
               srs_level: 0,
-              next_review_date: Date.now(), // Ready for review immediately
+              next_review_date: Date.now(),
           })),
         };
 
         setVocabList(prev => [newVocab, ...prev]);
         setWord('');
         inputRef.current?.focus();
+        setSpellSuggestion(null); // Clear suggestion on success
       } catch (e: any) {
         console.error("API Error:", e);
         let friendlyMessage = "Oops! Something went wrong. Please try again later.";
@@ -397,8 +392,7 @@ const App: React.FC = () => {
           }
         }
         setError(friendlyMessage);
-      } finally {
-        setIsLoading(false);
+        throw e; // Re-throw the error for the caller to handle
       }
   };
 
@@ -418,16 +412,13 @@ const App: React.FC = () => {
         contents: `Is the English word "${wordToLearn}" spelled correctly? If it is correct, respond with only the word "correct". If it is misspelled, respond with only the single, most likely correct spelling.`,
       });
       
-      // Add a 10-second timeout to prevent stalling
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Spell check request timed out. Please try again.")), 10000)
       );
       
       const spellCheckResponse = await Promise.race([spellCheckPromise, timeoutPromise]);
-
       const result = spellCheckResponse.text.trim().toLowerCase();
 
-      // Sanity check: if response is weird (e.g., a sentence), ignore it and proceed.
       if (result.includes(' ') || result.length > 25 || result.length === 0) {
           console.warn("Received unusual spell-check response, ignoring:", result);
           await fetchVocabData(wordToLearn);
@@ -438,12 +429,16 @@ const App: React.FC = () => {
         await fetchVocabData(wordToLearn);
       } else {
         setSpellSuggestion(result);
-        setIsLoading(false); // Stop loading to show the suggestion
       }
     } catch (e: any) {
-      console.error("Spell check failed, proceeding with original word.", e);
-      // If spell check fails, just try to learn the word as is for robustness.
-      await fetchVocabData(wordToLearn);
+      console.error("An error occurred during the learn word process. Trying original word as fallback.", e);
+      try {
+          await fetchVocabData(wordToLearn);
+      } catch (fallbackError) {
+          console.error("Fallback fetch also failed.", fallbackError);
+      }
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -452,7 +447,15 @@ const App: React.FC = () => {
       if(useSuggestion && spellSuggestion) {
           setWord(spellSuggestion); // Update input field
       }
-      await fetchVocabData(wordToLearn);
+      
+      setIsLoading(true);
+      try {
+        await fetchVocabData(wordToLearn);
+      } catch(e) {
+        console.error("Learning suggested word failed", e);
+      } finally {
+        setIsLoading(false);
+      }
   }
 
   return (
