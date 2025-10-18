@@ -289,50 +289,6 @@ body.theme-monochromatic .error-message { --error-color_10: rgba(220, 53, 69, 0.
   margin: 0;
 }
 
-/* NEW: Pronunciation Button */
-.pronunciation-btn {
-  background: none;
-  border: none;
-  padding: 0.5rem;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--primary-color);
-  transition: background-color 0.2s, transform 0.2s;
-}
-
-.pronunciation-btn:hover:not(:disabled) {
-  background-color: var(--primary-color_10, rgba(131, 56, 236, 0.1));
-  transform: scale(1.1);
-}
-body.theme-violet-yellow .pronunciation-btn { --primary-color_10: rgba(131, 56, 236, 0.1); --primary-color_20: rgba(131, 56, 236, 0.2); }
-body.theme-blue-green .pronunciation-btn { --primary-color_10: rgba(45, 125, 210, 0.1); --primary-color_20: rgba(45, 125, 210, 0.2); }
-body.theme-monochromatic .pronunciation-btn { --primary-color_10: rgba(52, 58, 64, 0.1); --primary-color_20: rgba(52, 58, 64, 0.2); }
-
-
-.pronunciation-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.pronunciation-btn.loading {
-  animation: pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 var(--primary-color_20);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(131, 56, 236, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(131, 56, 236, 0);
-  }
-}
-
 /* Meaning Container */
 .meaning-container {
   border: 1px solid var(--border-color);
@@ -626,25 +582,25 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
   border-radius: 10px;
   padding: 1rem;
 }
-.flashcard-front {
+.flashcard-front { /* Now shows Arabic definition */
+  background: var(--accent-color);
+  color: var(--accent-text-color);
+  text-align: center;
+}
+.flashcard-back { /* Now shows English word */
   background: linear-gradient(135deg, var(--card-background), #f1f3f5);
   border: 1px solid var(--border-color);
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--text-color);
-}
-.flashcard-back {
-  background: var(--accent-color);
-  color: var(--accent-text-color);
   transform: rotateY(180deg);
-  text-align: center;
 }
-.flashcard-back .one-word-ar {
+.flashcard-front .one-word-ar {
   color: var(--accent-text-color);
   font-size: 1.5rem;
   margin: 0;
 }
-.flashcard-back .explanation-ar {
+.flashcard-front .explanation-ar {
   color: var(--accent-text-color);
   opacity: 0.9;
   font-size: 1rem;
@@ -903,6 +859,13 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
   100% { transform: rotate(360deg); }
 }
 
+@keyframes pop-in {
+    0% { transform: scale(0); opacity: 0; }
+    50% { transform: scale(1.3); opacity: 1; }
+    100% { transform: scale(1); }
+}
+
+
 /* --- NEW APP FOOTER --- */
 .app-footer {
   text-align: center;
@@ -910,6 +873,52 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
   font-size: 0.9rem;
   color: var(--text-light);
 }
+
+/* --- API KEY PROMPT --- */
+.api-key-prompt-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.api-key-prompt-content {
+    background: var(--card-background);
+    color: var(--text-color);
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+}
+.api-key-prompt-content h2 {
+    margin-bottom: 1rem;
+    color: var(--primary-color);
+}
+.api-key-prompt-content p {
+    margin-bottom: 1.5rem;
+}
+.api-key-prompt-content a {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+.api-key-prompt-content button {
+    padding: 0.75rem 2rem;
+    font-size: 1rem;
+    font-weight: 700;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
 
 /* --- RESPONSIVENESS --- */
 @media (max-width: 480px) {

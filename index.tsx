@@ -8,15 +8,29 @@
 // - THEME SELECTOR: User can choose from multiple color schemes.
 // - Printable word list modal with CSV EXPORT.
 // - Robust error handling for API calls.
-// - NEW: Audio pronunciation for each word using Gemini Text-to-Speech.
-// - NEW: Smart duplicate handling to prevent re-adding existing words.
+// - Smart duplicate handling to prevent re-adding existing words.
+// - Robust API key selection and validation flow.
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
-import { GoogleGenAI, Type, Modality } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TYPE DEFINITIONS ---
+
+// Add aistudio to the global window interface for TypeScript
+// FIX: The property 'aistudio' on 'Window' must be of type 'AIStudio'.
+// Renaming 'AppAIStudio' to 'AIStudio' to match the existing global type and allow for declaration merging.
+interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+}
+
+declare global {
+    interface Window {
+        aistudio?: AIStudio;
+    }
+}
 
 interface MultipleChoice {
   options: string[];
@@ -121,13 +135,6 @@ const StarIcon: React.FC<{ style?: React.CSSProperties }> = ({ style }) => (
     </motion.svg>
 );
 
-const SpeakerIcon: React.FC<{ style?: React.CSSProperties }> = ({ style }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-    </svg>
-);
-
 // --- UTILITY FUNCTIONS ---
 
 /**
@@ -155,38 +162,475 @@ const validateApiResponse = (data: any): { meanings: any[] } => {
     return data;
 };
 
-// --- AUDIO DECODING UTILITIES ---
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-
 // --- REACT COMPONENTS ---
+
+const ApiKeyPrompt: React.FC<{ onKeySelect: () => void }> = ({ onKeySelect }) => {
+    const handleSelectKey = async () => {
+        if (window.aistudio) {
+            await window.aistudio.openSelectKey();
+            // Assume success and let the parent component handle the state change
+            onKeySelect();
+        } else {
+            // Fallback for environments where aistudio is not available
+            alert("API key selection is not available in this environment.");
+        }
+    };
+
+    return (
+        <div className="api-key-prompt-overlay">
+            <motion.div 
+                className="api-key-prompt-content"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+                <h2>API Key Required</h2>
+                <p>To use the AI features of this app, you need to select a Gemini API key. Your key is stored securely and only used for your session.</p>
+                <p>For information on pricing and setting up a key, please visit the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">Gemini API billing documentation</a>.</p>
+                <button onClick={handleSelectKey}>Select API Key</button>
+            </motion.div>
+        </div>
+    );
+};
+
+const ThemeSelector: React.FC<{ currentTheme: Theme; onThemeChange: (theme: Theme) => void; }> = ({ currentTheme, onThemeChange }) => (
+    <div className="theme-selector" title="Change Theme">
+        {themes.map(themeOption => (
+            <div
+                key={themeOption.id}
+                className={`theme-option ${currentTheme === themeOption.id ? 'active' : ''}`}
+                style={{ background: themeOption.colors.primary, border: `2px solid ${themeOption.colors.secondary}` }}
+                onClick={() => onThemeChange(themeOption.id)}
+            />
+        ))}
+    </div>
+);
+
+const FeedbackAnimation: React.FC<{ isCorrect: boolean; onReread: () => void; }> = ({ isCorrect, onReread }) => {
+    return (
+        <motion.div
+            className={`feedback-animation-container ${isCorrect ? 'correct' : 'incorrect'}`}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+        >
+            {isCorrect ? (
+                <>
+                    <div className="stars-container">
+                        {[...Array(3)].map((_, i) => (
+                            <StarIcon key={i} style={{
+                                animation: `pop-in 0.5s ${i * 0.1}s both ease-out`
+                            }} />
+                        ))}
+                    </div>
+                    <p>Excellent! You've mastered this. ✨</p>
+                </>
+            ) : (
+                <>
+                    <p>Not quite. Give it another try!</p>
+                    <button onClick={onReread} className="reread-link">
+                        Review the definition again?
+                    </button>
+                </>
+            )}
+        </motion.div>
+    );
+};
+
+const GapFillQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
+    const [answer, setAnswer] = useState('');
+    const [feedback, setFeedback] = useState<{ isCorrect: boolean } | null>(null);
+    const wordToGuess = meaning.gap_fill_full_sentence.replace(meaning.gap_fill_prompt, '').replace(/\.$/, '').trim();
+
+    const handleSubmit = () => {
+        if (!answer.trim()) return;
+        const isCorrect = answer.trim().toLowerCase() === wordToGuess.toLowerCase();
+        setFeedback({ isCorrect });
+        onComplete(isCorrect);
+    };
+
+    return (
+        <div className="quiz-content">
+            <p><strong>Fill in the blank:</strong> "{meaning.gap_fill_prompt}"</p>
+            <div className="gap-fill-controls">
+                <input
+                    type="text"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                    placeholder="Type the word"
+                    disabled={!!feedback}
+                />
+                <button onClick={handleSubmit} disabled={!!feedback}>Check</button>
+            </div>
+            {feedback && (
+                <div className={`quiz-feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}`}>
+                    <strong>{feedback.isCorrect ? 'Correct!' : 'Not quite.'}</strong>
+                    <p>The full sentence is: "{meaning.gap_fill_full_sentence}"</p>
+                    <p style={{ fontFamily: "'Noto Sans Arabic', sans-serif", textAlign: 'right' }}>{meaning.gap_fill_full_sentence_arabic}</p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const MultipleChoiceQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
+    const [answer, setAnswer] = useState<{ selected: string, isCorrect: boolean } | null>(null);
+    const options = useMemo(() => [...meaning.multiple_choice.options].sort(() => Math.random() - 0.5), [meaning.multiple_choice.options]);
+
+    const handleAnswer = (option: string) => {
+        const isCorrect = option === meaning.multiple_choice.correct_answer;
+        setAnswer({ selected: option, isCorrect });
+        onComplete(isCorrect);
+    };
+
+    return (
+        <div className="quiz-content">
+            <p><strong>Choose the correct word:</strong> "{meaning.multiple_choice_prompt}"</p>
+            <div className="mc-options">
+                {options.map(option => (
+                    <button
+                        key={option}
+                        className={`mc-option ${answer && (option === meaning.multiple_choice.correct_answer ? 'correct' : (option === answer.selected ? 'incorrect' : ''))}`}
+                        onClick={() => handleAnswer(option)}
+                        disabled={!!answer}
+                    >
+                        {option}
+                    </button>
+                ))}
+            </div>
+            {answer && (
+                <div className={`quiz-feedback ${answer.isCorrect ? 'correct' : 'incorrect'}`}>
+                    <strong>{answer.isCorrect ? 'Correct!' : 'Incorrect.'}</strong> The correct answer is "{meaning.multiple_choice.correct_answer}".
+                    <p>Full sentence: "{meaning.multiple_choice_full_sentence}"</p>
+                    <p style={{ fontFamily: "'Noto Sans Arabic', sans-serif", textAlign: 'right' }}>{meaning.multiple_choice_full_sentence_arabic}</p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const FlashcardQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
+    const [isFlipped, setIsFlipped] = useState(false);
+    const [isAssessed, setIsAssessed] = useState(false);
+
+    const handleAssess = (isCorrect: boolean) => {
+        setIsAssessed(true);
+        onComplete(isCorrect);
+    };
+
+    return (
+        <div className="quiz-content">
+            <p>Read the definition below. Can you remember the English word? Click to flip.</p>
+            <div className="flashcard-container" onClick={() => !isAssessed && setIsFlipped(!isFlipped)}>
+                <div className={`flashcard ${isFlipped ? 'is-flipped' : ''}`}>
+                    <div className="flashcard-face flashcard-front">
+                        <p className="one-word-ar">{meaning.one_word_arabic}</p>
+                        <p className="explanation-ar">{meaning.explanation_arabic}</p>
+                    </div>
+                    <div className="flashcard-face flashcard-back">
+                        {meaning.multiple_choice.correct_answer}
+                    </div>
+                </div>
+            </div>
+            {isFlipped && !isAssessed && (
+                <motion.div
+                    className="flashcard-assessment"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                >
+                    <p>Did you remember it correctly?</p>
+                    <button className="assess-correct" onClick={() => handleAssess(true)}>Yes</button>
+                    <button className="assess-incorrect" onClick={() => handleAssess(false)}>No</button>
+                </motion.div>
+            )}
+        </div>
+    );
+};
+
+const QuizContainer: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = React.memo(({ meaning, onComplete }) => {
+    const [quizType, setQuizType] = useState<'gap-fill' | 'multiple-choice' | 'flashcard'>('gap-fill');
+    const [isComplete, setIsComplete] = useState(false);
+    const [wasCorrect, setWasCorrect] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Reset state when the word/meaning changes
+    useEffect(() => {
+        setIsComplete(false);
+        setWasCorrect(false);
+        setQuizType('gap-fill');
+    }, [meaning]);
+
+    const handleQuizComplete = (correct: boolean) => {
+        setIsComplete(true);
+        setWasCorrect(correct);
+        onComplete(correct); // Pass result to parent
+    };
+
+    const scrollToTop = () => {
+        containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    return (
+        <div className="section-box quiz-box" ref={containerRef}>
+            <div className="section-header">
+                <QuizIcon />
+                <h3>Practice This Meaning</h3>
+            </div>
+            {isComplete ? (
+                <FeedbackAnimation isCorrect={wasCorrect} onReread={scrollToTop} />
+            ) : (
+                <>
+                    <div className="quiz-type-selector">
+                        <button className={quizType === 'gap-fill' ? 'active' : ''} onClick={() => setQuizType('gap-fill')}>Gap-Fill</button>
+                        <button className={quizType === 'multiple-choice' ? 'active' : ''} onClick={() => setQuizType('multiple-choice')}>Multiple Choice</button>
+                        <button className={quizType === 'flashcard' ? 'active' : ''} onClick={() => setQuizType('flashcard')}>Flashcard</button>
+                    </div>
+                    {quizType === 'gap-fill' && <GapFillQuiz meaning={meaning} onComplete={handleQuizComplete} />}
+                    {quizType === 'multiple-choice' && <MultipleChoiceQuiz meaning={meaning} onComplete={handleQuizComplete} />}
+                    {quizType === 'flashcard' && <FlashcardQuiz meaning={meaning} onComplete={handleQuizComplete} />}
+                </>
+            )}
+        </div>
+    );
+});
+
+const MeaningCard: React.FC<{ meaning: Meaning; index: number; handleQuizComplete: (isCorrect: boolean) => void; }> = React.memo(({ meaning, index, handleQuizComplete }) => (
+    <motion.div
+        className="meaning-container"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: index * 0.1 }}
+    >
+        <div className="meaning-header">
+            <div className="meaning-number">{index + 1}</div>
+        </div>
+        <div className="pos-tags">
+            <span className="pos-tag-en">{meaning.part_of_speech_english}</span>
+            <span className="pos-tag-ar">{meaning.part_of_speech_arabic}</span>
+        </div>
+        <p className="one-word-ar">{meaning.one_word_arabic}</p>
+        <p className="explanation-ar">{meaning.explanation_arabic}</p>
+
+        <div className="section-box sentence-box">
+            <div className="section-header">
+                <SentenceIcon />
+                <h4>Example Sentence</h4>
+            </div>
+            <p className="sentence-en">{meaning.example_sentence_english}</p>
+            <p className="sentence-ar">{meaning.example_sentence_arabic}</p>
+        </div>
+
+        <QuizContainer meaning={meaning} onComplete={handleQuizComplete} />
+    </motion.div>
+));
+
+const VocabCard: React.FC<{ vocab: VocabData; handleQuizComplete: (meaningIndex: number, isCorrect: boolean) => void; }> = React.memo(({ vocab, handleQuizComplete }) => (
+    <motion.div
+        className="vocab-card"
+        data-word-id={vocab.id}
+        layout
+        initial={{ opacity: 0, y: 50, scale: 0.9 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -20, scale: 0.95 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+    >
+        <div className="vocab-header">
+            <h2>{vocab.word}</h2>
+        </div>
+        {vocab.meanings.map((meaning, index) => (
+            <MeaningCard
+                key={`${vocab.id}-${index}`}
+                meaning={meaning}
+                index={index}
+                handleQuizComplete={(isCorrect) => handleQuizComplete(index, isCorrect)}
+            />
+        ))}
+    </motion.div>
+));
+
+const WordListModal: React.FC<{ vocabList: VocabData[]; onClose: () => void; }> = ({ vocabList, onClose }) => {
+    const handlePrint = () => window.print();
+
+    const handleExport = () => {
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "Word,Part of Speech,Arabic Translation,Arabic Explanation,Example (English),Example (Arabic)\r\n";
+
+        vocabList.forEach(item => {
+            item.meanings.forEach(m => {
+                const row = [
+                    `"${item.word}"`,
+                    `"${m.part_of_speech_english}"`,
+                    `"${m.one_word_arabic}"`,
+                    `"${m.explanation_arabic.replace(/"/g, '""')}"`,
+                    `"${m.example_sentence_english.replace(/"/g, '""')}"`,
+                    `"${m.example_sentence_arabic.replace(/"/g, '""')}"`
+                ].join(",");
+                csvContent += row + "\r\n";
+            });
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "vocab_list.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    return (
+        <motion.div className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+        >
+            <motion.div className="modal-content"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -50, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+            >
+                <div className="modal-header">
+                    <h2>My Word List ({vocabList.length})</h2>
+                    <button onClick={onClose} className="close-btn">&times;</button>
+                </div>
+                <div className="modal-body">
+                    {vocabList.length > 0 ? (
+                        <table className="word-table">
+                            <thead>
+                                <tr>
+                                    <th>English Word</th>
+                                    <th>Meanings (Arabic)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {vocabList.map(item => (
+                                    <tr key={item.id}>
+                                        <td><strong>{item.word}</strong></td>
+                                        <td>
+                                            {item.meanings.map((m, i) => (
+                                                <div key={i} style={{ marginBottom: '0.5rem' }}>
+                                                    <strong>{m.one_word_arabic}</strong> ({m.part_of_speech_arabic}): {m.explanation_arabic}
+                                                </div>
+                                            ))}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <p>Your word list is empty. Start learning new words!</p>
+                    )}
+                </div>
+                <div className="modal-footer">
+                    <button className="secondary-btn" onClick={handlePrint}>Print</button>
+                    <button className="export-btn" onClick={handleExport}>Export as CSV</button>
+                    <button onClick={onClose}>Close</button>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+};
+
+const ReviewPromptModal: React.FC<{ onClose: () => void; onStartReview: () => void; onPrint: () => void; wordsForReviewCount: number; }> = ({ onClose, onStartReview, onPrint, wordsForReviewCount }) => {
+    return (
+        <motion.div className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+        >
+            <motion.div className="modal-content"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -50, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+            >
+                <div className="modal-header">
+                    <h2>Review Time!</h2>
+                    <button onClick={onClose} className="close-btn">&times;</button>
+                </div>
+                <div className="modal-body prompt-body">
+                    <p className="prompt-message">You have {wordsForReviewCount} word(s) ready for review.</p>
+                    <p className="prompt-submessage">Strengthen your memory with a quick practice session.</p>
+                    <div className="prompt-actions">
+                        <button className="prompt-action-primary" onClick={onStartReview}>Start Review Session</button>
+                        <button className="prompt-action-secondary" onClick={onPrint}>View Full Word List</button>
+                    </div>
+                    <p className="prompt-reminder">Regular reviews help you learn words for the long term.</p>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+};
+
+const ReviewSession: React.FC<{ items: ReviewItem[]; onClose: () => void; onQuizComplete: (wordId: string, meaningIndex: number, isCorrect: boolean) => void; }> = ({ items, onClose, onQuizComplete }) => {
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [correctCount, setCorrectCount] = useState(0);
+    const [isSessionComplete, setIsSessionComplete] = useState(false);
+    const currentItem = items[currentIndex];
+
+    const handleNext = (isCorrect: boolean) => {
+        onQuizComplete(currentItem.wordId, currentItem.meaningIndex, isCorrect);
+        if (isCorrect) {
+            setCorrectCount(prev => prev + 1);
+        }
+
+        setTimeout(() => {
+            if (currentIndex < items.length - 1) {
+                setCurrentIndex(prev => prev + 1);
+            } else {
+                setIsSessionComplete(true);
+            }
+        }, 1500); // Wait for feedback animation/message
+    };
+
+    if (!currentItem && !isSessionComplete) {
+        return null; // Should not happen, but a good safeguard
+    }
+
+    return (
+        <motion.div className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+        >
+            <motion.div className="modal-content review-session"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -50, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+            >
+                {!isSessionComplete ? (
+                    <>
+                        <div className="modal-header">
+                            <h2>Review Session</h2>
+                            <button onClick={onClose} className="close-btn">&times;</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="review-progress">
+                                <div className="progress-bar" style={{ width: `${((currentIndex + 1) / items.length) * 100}%` }}></div>
+                            </div>
+                            <p className="progress-text">Word {currentIndex + 1} of {items.length}</p>
+                            <div className="review-quiz-area">
+                                <h3>Practice the following concept:</h3>
+                                <QuizContainer meaning={currentItem.meaning} onComplete={handleNext} />
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    <div className="review-summary">
+                        <h2>Session Complete!</h2>
+                        <p>You reviewed {items.length} words and got {correctCount} correct.</p>
+                        <p>Keep up the great work!</p>
+                        <button onClick={onClose}>Finish</button>
+                    </div>
+                )}
+            </motion.div>
+        </motion.div>
+    );
+};
+
 const App: React.FC = () => {
   const [vocabList, setVocabList] = useState<VocabData[]>([]);
   const [word, setWord] = useState('');
@@ -197,7 +641,18 @@ const App: React.FC = () => {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [theme, setTheme] = useState<Theme>('violet-yellow');
+  const [isApiKeySelected, setIsApiKeySelected] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check for API key on initial load
+  useEffect(() => {
+    const checkApiKey = async () => {
+        if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+            setIsApiKeySelected(true);
+        }
+    };
+    checkApiKey();
+  }, []);
 
 
   // Load vocab list and theme from localStorage on initial render
@@ -276,6 +731,21 @@ const App: React.FC = () => {
     }
   }, [theme]);
   
+  const handleApiError = (e: any) => {
+    console.error("API Error:", e);
+    const message = e?.message || '';
+
+    if (message.includes("Requested entity was not found") || message.includes("API key not valid")) {
+        setError("Your API key seems to be invalid. Please select a new key to continue.");
+        setIsApiKeySelected(false);
+    } else if (message.includes("API Key must be set")) {
+        setError("An API key is required. Please select one to proceed.");
+        setIsApiKeySelected(false);
+    } else {
+        const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
+        setError(friendlyMessage);
+    }
+  };
 
   const handleQuizComplete = (wordId: string, meaningIndex: number, isCorrect: boolean) => {
       setVocabList(currentList => {
@@ -439,17 +909,7 @@ const App: React.FC = () => {
         setWord('');
         inputRef.current?.focus();
       } catch (e: any) {
-        console.error("API Error:", e);
-        // Re-map common API key errors to a user-friendly message.
-        if (e && e.message && (e.message.includes("API Key must be set") || e.message.includes("API key not valid")  || e.message.includes("Requested entity was not found"))) {
-            setError("API Error: The API key is missing or invalid. Please ensure it is configured correctly.");
-        } else {
-            let friendlyMessage = "Oops! Something went wrong. Please try again later.";
-            if (e && e.message) {
-                friendlyMessage = `API Error: ${e.message}`;
-            }
-            setError(friendlyMessage);
-        }
+        handleApiError(e);
         throw e; // Re-throw so the calling function can handle loading state.
       }
   };
@@ -491,6 +951,13 @@ const App: React.FC = () => {
   return (
     <>
       <AnimatePresence>
+        {!isApiKeySelected && <ApiKeyPrompt onKeySelect={() => {
+            setIsApiKeySelected(true);
+            setError(null); // Clear previous API key errors
+        }} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showReviewPrompt && (
             <ReviewPromptModal
                 key="review-prompt-modal"
@@ -515,7 +982,7 @@ const App: React.FC = () => {
         {isReviewing && <ReviewSession key="review-session-modal" items={reviewItems} onClose={() => setIsReviewing(false)} onQuizComplete={handleQuizComplete} />}
       </AnimatePresence>
       
-      <div className="app-container">
+      <div className="app-container" style={{ filter: isApiKeySelected ? 'none' : 'blur(4px)'}}>
         <header className="app-header">
           <h1>Vocab Learning Assistant</h1>
           <p>Enter an English word to learn its meaning in Arabic, usage, and example.</p>
@@ -530,707 +997,57 @@ const App: React.FC = () => {
             onChange={(e) => setWord(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLearnWord()}
             placeholder="e.g., happy, run, book"
-            aria-label="Enter a word"
-            disabled={isLoading}
+            aria-label="Enter an English word"
+            disabled={isLoading || !isApiKeySelected}
           />
-          <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
+          <button onClick={handleLearnWord} disabled={isLoading || !word.trim() || !isApiKeySelected}>
             {isLoading ? <div className="spinner"></div> : 'Learn Word'}
           </button>
         </div>
-        
-        {error && <div className="error-message">{error}</div>}
+
+        {error && <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="error-message"
+        >{error}</motion.div>}
 
         <div className="controls-area">
-          <button className="finish-btn" onClick={() => setShowReviewPrompt(true)} disabled={isLoading || vocabList.length === 0}>
-            Finish Session
-          </button>
-          <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={isLoading || vocabList.length === 0}>
-            View Word List ({vocabList.length})
-          </button>
-          <button className="clear-btn" onClick={handleClearList} disabled={isLoading || vocabList.length === 0}>
-            Clear List
-          </button>
+            <button className="clear-btn" onClick={handleClearList} disabled={vocabList.length === 0}>Clear List</button>
+            <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={vocabList.length === 0}>My Words</button>
+            <button
+                className="finish-btn"
+                onClick={() => {
+                    if (wordsForReviewCount > 0) {
+                        setShowReviewPrompt(true);
+                    } else {
+                        alert("You have no words due for review right now. Keep learning!");
+                    }
+                }}
+                disabled={vocabList.length === 0}
+            >
+                Review ({wordsForReviewCount})
+            </button>
         </div>
-        
-        <main className="vocab-list">
-          <AnimatePresence>
-            {vocabList.map(item => (
-              <motion.div
-                key={item.id}
-                layout
-                initial={{ opacity: 0, y: 50, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-              >
-                <VocabCard vocabData={item} onQuizComplete={handleQuizComplete}/>
-              </motion.div>
+
+        <AnimatePresence>
+          <div className="vocab-list">
+            {vocabList.map((vocab) => (
+              <VocabCard
+                key={vocab.id}
+                vocab={vocab}
+                handleQuizComplete={(meaningIndex, isCorrect) => handleQuizComplete(vocab.id, meaningIndex, isCorrect)}
+              />
             ))}
-          </AnimatePresence>
-        </main>
+          </div>
+        </AnimatePresence>
 
         <footer className="app-footer">
-            Designed by: Nazila Motahari
+          <p>Designed by Nazila Motahari | Powered by Gemini. Happy Learning!</p>
         </footer>
       </div>
     </>
   );
 };
 
-const ThemeSelector: React.FC<{ currentTheme: Theme; onThemeChange: (theme: Theme) => void; }> = ({ currentTheme, onThemeChange }) => {
-    return (
-        <div className="theme-selector">
-            {themes.map(theme => (
-                <button
-                    key={theme.id}
-                    className={`theme-option ${currentTheme === theme.id ? 'active' : ''}`}
-                    title={theme.name}
-                    onClick={() => onThemeChange(theme.id)}
-                    style={{ background: `linear-gradient(45deg, ${theme.colors.primary}, ${theme.colors.secondary})` }}
-                >
-                </button>
-            ))}
-        </div>
-    );
-};
-
-
-const VocabCard: React.FC<{ vocabData: VocabData, onQuizComplete: (wordId: string, meaningIndex: number, isCorrect: boolean) => void }> = ({ vocabData, onQuizComplete }) => {
-  const [isAudioLoading, setIsAudioLoading] = useState(false);
-
-  const handlePlayPronunciation = async () => {
-    if (isAudioLoading) return;
-    setIsAudioLoading(true);
-
-    try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: vocabData.word }] }],
-            config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: { voiceName: 'Kore' },
-                    },
-                },
-            },
-        });
-        
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (base64Audio) {
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-            const audioBuffer = await decodeAudioData(
-                decode(base64Audio),
-                audioContext,
-                24000,
-                1,
-            );
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-            source.start();
-        } else {
-            throw new Error("No audio data received from API.");
-        }
-    } catch (err) {
-        console.error("Failed to play pronunciation:", err);
-    } finally {
-        setIsAudioLoading(false);
-    }
-  };
-
-  return (
-    <div className="vocab-card" data-word-id={vocabData.id}>
-      <div className="vocab-header">
-        <h2>{vocabData.word}</h2>
-        <button 
-            className={`pronunciation-btn ${isAudioLoading ? 'loading' : ''}`} 
-            onClick={handlePlayPronunciation} 
-            disabled={isAudioLoading}
-            aria-label={`Listen to pronunciation of ${vocabData.word}`}
-        >
-            <SpeakerIcon />
-        </button>
-      </div>
-      
-      {vocabData.meanings.map((meaning, index) => (
-        <MeaningCard 
-            key={index} 
-            meaning={meaning} 
-            word={vocabData.word} 
-            index={index + 1} 
-            totalMeanings={vocabData.meanings.length}
-            onQuizComplete={(isCorrect) => onQuizComplete(vocabData.id, index, isCorrect)}
-        />
-      ))}
-    </div>
-  );
-};
-
-const QuizFeedbackAnimation: React.FC<{
-    isCorrect: boolean;
-    correctMessage: string;
-    incorrectMessage: string;
-    onReRead?: () => void;
-}> = ({ isCorrect, correctMessage, incorrectMessage, onReRead }) => {
-    return (
-        <div className={`feedback-animation-container ${isCorrect ? 'correct' : 'incorrect'}`}>
-            {isCorrect && (
-                <div className="stars-container">
-                    {[...Array(5)].map((_, i) => (
-                        <motion.div
-                            key={i}
-                            initial={{ opacity: 0, y: 20, scale: 0.5 }}
-                            animate={{ 
-                                opacity: [0, 1, 0], 
-                                y: [20, -10, -20], 
-                                scale: [0.5, 1, 0.8],
-                                rotate: Math.random() * 180 - 90
-                            }}
-                            transition={{ 
-                                duration: 0.8, 
-                                ease: "easeOut",
-                                delay: i * 0.1
-                            }}
-                        >
-                            <StarIcon />
-                        </motion.div>
-                    ))}
-                </div>
-            )}
-            <p>{isCorrect ? correctMessage : incorrectMessage}</p>
-            {!isCorrect && onReRead && (
-                <button onClick={onReRead} className="reread-link">
-                    Re-read Definition
-                </button>
-            )}
-        </div>
-    );
-};
-
-
-const MeaningCard: React.FC<{ 
-    meaning: Meaning, 
-    word: string, 
-    index: number, 
-    totalMeanings: number,
-    onQuizComplete: (isCorrect: boolean) => void
-}> = ({ meaning, word, index, totalMeanings, onQuizComplete }) => {
-    const [quizType, setQuizType] = useState<'gap' | 'mc' | 'flash'>('gap');
-    const [gapFillAnswer, setGapFillAnswer] = useState('');
-    const [isGapFillCorrect, setIsGapFillCorrect] = useState<boolean | null>(null);
-    const [mcAnswer, setMcAnswer] = useState<string | null>(null);
-    const [isFlashcardFlipped, setIsFlashcardFlipped] = useState(false);
-    const [flashcardResult, setFlashcardResult] = useState<'correct' | 'incorrect' | null>(null);
-
-    const meaningRef = useRef<HTMLDivElement>(null);
-
-    const handleReRead = () => {
-        meaningRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    };
-
-    const checkGapFill = () => {
-        const isCorrect = gapFillAnswer.trim().toLowerCase() === word.toLowerCase();
-        setIsGapFillCorrect(isCorrect);
-        onQuizComplete(isCorrect);
-    };
-    
-    const handleMcClick = (option: string) => {
-        const isCorrect = option === meaning.multiple_choice.correct_answer;
-        setMcAnswer(option);
-        onQuizComplete(isCorrect);
-    };
-
-    const handleFlashcardAssessment = (result: 'correct' | 'incorrect') => {
-        setFlashcardResult(result);
-        onQuizComplete(result === 'correct');
-    };
-
-    const resetQuizStates = (type: 'gap' | 'mc' | 'flash') => {
-        setQuizType(type);
-        setGapFillAnswer('');
-        setIsGapFillCorrect(null);
-        setMcAnswer(null);
-        setIsFlashcardFlipped(false);
-        setFlashcardResult(null);
-    };
-
-    return (
-        <div className="meaning-container" ref={meaningRef}>
-            {totalMeanings > 1 && (
-              <div className="meaning-header">
-                <span className="meaning-number">{index}</span>
-              </div>
-            )}
-            <div className="pos-tags">
-                <span className="pos-tag-en">{meaning.part_of_speech_english}</span>
-                <span className="pos-tag-ar">{meaning.part_of_speech_arabic}</span>
-            </div>
-            <p className="one-word-ar" dir="rtl">{meaning.one_word_arabic}</p>
-            <p className="explanation-ar" dir="rtl">{meaning.explanation_arabic}</p>
-
-            <div className="section-box sentence-box">
-                <h3 className="section-header">
-                  <SentenceIcon /> Example Sentence
-                </h3>
-                <p className="sentence-en">"{meaning.example_sentence_english}"</p>
-                <p className="sentence-ar" dir="rtl">{meaning.example_sentence_arabic}</p>
-            </div>
-
-            <div className="section-box quiz-box">
-                 <h3 className="section-header">
-                  <QuizIcon /> Spot Check Quiz
-                </h3>
-                <div className="quiz-type-selector">
-                    <button onClick={() => resetQuizStates('gap')} className={quizType === 'gap' ? 'active' : ''}>Gap-Fill</button>
-                    <button onClick={() => resetQuizStates('mc')} className={quizType === 'mc' ? 'active' : ''}>Multiple Choice</button>
-                    <button onClick={() => resetQuizStates('flash')} className={quizType === 'flash' ? 'active' : ''}>Flashcard</button>
-                </div>
-                
-                {quizType === 'gap' && (
-                    <div className="quiz-content">
-                        <p>{meaning.gap_fill_prompt.replace('___', ' ______ ')}</p>
-                        <div className="gap-fill-controls">
-                            <input 
-                                type="text"
-                                value={gapFillAnswer}
-                                onChange={(e) => setGapFillAnswer(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && checkGapFill()}
-                                placeholder="Your answer"
-                                aria-label="Gap-fill answer"
-                                disabled={isGapFillCorrect !== null}
-                            />
-                            <button onClick={checkGapFill} disabled={isGapFillCorrect !== null}>Check</button>
-                        </div>
-                        {isGapFillCorrect !== null && (
-                            <>
-                                <QuizFeedbackAnimation 
-                                    isCorrect={isGapFillCorrect}
-                                    correctMessage="Correct! Well done!"
-                                    incorrectMessage={`Not quite. The answer is "${word}".`}
-                                    onReRead={handleReRead}
-                                />
-                                <div className={`quiz-feedback ${isGapFillCorrect ? 'correct' : 'incorrect'}`}>
-                                    <p className="sentence-en"><b>Full sentence:</b> "{meaning.gap_fill_full_sentence}"</p>
-                                    <p className="sentence-ar" dir="rtl">{meaning.gap_fill_full_sentence_arabic}</p>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                )}
-
-                {quizType === 'mc' && (
-                    <div className="quiz-content">
-                        <p>Which word best completes the sentence?</p>
-                        <p>"{meaning.multiple_choice_prompt.replace('___', ' ______ ')}"</p>
-                        <div className="mc-options">
-                            {meaning.multiple_choice.options.map((option, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => handleMcClick(option)}
-                                    className={`
-                                        mc-option
-                                        ${mcAnswer && option === meaning.multiple_choice.correct_answer ? 'correct' : ''}
-                                        ${mcAnswer && option !== meaning.multiple_choice.correct_answer && option === mcAnswer ? 'incorrect' : ''}
-                                    `}
-                                    disabled={mcAnswer !== null}
-                                >
-                                    {option}
-                                </button>
-                            ))}
-                        </div>
-                        {mcAnswer !== null && (
-                            <>
-                                <QuizFeedbackAnimation 
-                                    isCorrect={mcAnswer === meaning.multiple_choice.correct_answer}
-                                    correctMessage="Correct! Great job!"
-                                    incorrectMessage={`That's not it. The answer is "${meaning.multiple_choice.correct_answer}".`}
-                                    onReRead={handleReRead}
-                                />
-                                <div className={`quiz-feedback ${mcAnswer === meaning.multiple_choice.correct_answer ? 'correct' : 'incorrect'}`}>
-                                    <p className="sentence-en"><b>Full sentence:</b> "{meaning.multiple_choice_full_sentence}"</p>
-                                    <p className="sentence-ar" dir="rtl">{meaning.multiple_choice_full_sentence_arabic}</p>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                )}
-                
-                {quizType === 'flash' && (
-                    <div className="quiz-content">
-                        <p>Click the card to reveal the meaning, then test yourself.</p>
-                        <div className="flashcard-container" onClick={() => setIsFlashcardFlipped(!isFlashcardFlipped)}>
-                            <div className={`flashcard ${isFlashcardFlipped ? 'is-flipped' : ''}`}>
-                                <div className="flashcard-face flashcard-front">
-                                    {word}
-                                </div>
-                                <div className="flashcard-face flashcard-back">
-                                    <p className="one-word-ar" dir="rtl">{meaning.one_word_arabic}</p>
-                                    <p className="explanation-ar" dir="rtl">{meaning.explanation_arabic}</p>
-                                    <span className="pos-tag-ar">{meaning.part_of_speech_arabic}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <AnimatePresence>
-                            {isFlashcardFlipped && flashcardResult === null && (
-                                <motion.div 
-                                    className="flashcard-assessment"
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: 10 }}
-                                >
-                                    <button className="assess-correct" onClick={() => handleFlashcardAssessment('correct')}>I knew it!</button>
-                                    <button className="assess-incorrect" onClick={() => handleFlashcardAssessment('incorrect')}>Need practice</button>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                        {flashcardResult !== null && (
-                             <QuizFeedbackAnimation 
-                                isCorrect={flashcardResult === 'correct'}
-                                correctMessage="Awesome! Keep it up!"
-                                incorrectMessage="No worries! Practice makes perfect."
-                                onReRead={handleReRead}
-                            />
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-const WordListModal: React.FC<{ vocabList: VocabData[], onClose: () => void }> = ({ vocabList, onClose }) => {
-    const modalRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        modalRef.current?.focus();
-    }, []);
-
-    const handlePrint = () => {
-        window.print();
-    };
-    
-    const handleExport = () => {
-        const sanitizeField = (field: string): string => {
-            if (typeof field !== 'string') return '""';
-            // Wrap in quotes, escape existing quotes, and remove newlines.
-            const sanitized = field.replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ");
-            return `"${sanitized}"`;
-        };
-
-        const headers = ['English Word', 'Part of Speech (EN)', 'Arabic Meaning', 'Arabic Explanation'];
-        const csvRows = [headers.join(',')];
-
-        vocabList.forEach(item => {
-            if (!item || !item.meanings) return;
-            item.meanings.forEach(meaning => {
-                if (!meaning) return;
-                const row = [
-                    sanitizeField(item.word),
-                    sanitizeField(meaning.part_of_speech_english),
-                    sanitizeField(meaning.one_word_arabic),
-                    sanitizeField(meaning.explanation_arabic)
-                ];
-                csvRows.push(row.join(','));
-            });
-        });
-
-        const csvContent = csvRows.join('\n');
-        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'vocab_list.csv');
-        document.body.appendChild(link);
-        link.click();
-        
-        // Use a small timeout to ensure the download has time to start, especially in Firefox.
-        setTimeout(() => {
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        }, 100);
-    };
-
-    return (
-        <motion.div 
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-        >
-            <motion.div 
-                ref={modalRef}
-                tabIndex={-1}
-                className="modal-content"
-                initial={{ y: -50, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -50, opacity: 0 }}
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="modal-header">
-                    <h2>My Word List</h2>
-                    <button className="close-btn" onClick={onClose} aria-label="Close word list">&times;</button>
-                </div>
-                <div className="modal-body">
-                    <table className="word-table">
-                        <thead>
-                            <tr>
-                                <th>English Word</th>
-                                <th>Meaning in Arabic</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {vocabList.map(item => (
-                               <React.Fragment key={item.id}>
-                                {item.meanings.map((meaning, index) => (
-                                    <tr key={`${item.id}-${index}`}>
-                                        {index === 0 ? <td rowSpan={item.meanings.length}>{item.word}</td> : null}
-                                        <td dir="rtl"><strong>{meaning.one_word_arabic}</strong> ({meaning.part_of_speech_arabic})<br/>{meaning.explanation_arabic}</td>
-                                    </tr>
-                                ))}
-                               </React.Fragment>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-                <div className="modal-footer">
-                    <button onClick={handleExport} className="export-btn">Export as CSV</button>
-                    <button onClick={handlePrint}>Print List</button>
-                    <button className="secondary-btn" onClick={onClose}>Close</button>
-                </div>
-            </motion.div>
-        </motion.div>
-    );
-};
-
-
-const ReviewPromptModal: React.FC<{
-    onClose: () => void;
-    onStartReview: () => void;
-    onPrint: () => void;
-    wordsForReviewCount: number;
-}> = ({ onClose, onStartReview, onPrint, wordsForReviewCount }) => {
-    const modalRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        modalRef.current?.focus();
-    }, []);
-
-    return (
-        <motion.div 
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-        >
-            <motion.div 
-                ref={modalRef}
-                tabIndex={-1}
-                className="modal-content"
-                initial={{ y: -50, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -50, opacity: 0 }}
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="modal-header">
-                    <h2>Session Finished!</h2>
-                    <button className="close-btn" onClick={onClose} aria-label="Close review prompt">&times;</button>
-                </div>
-                <div className="modal-body prompt-body">
-                    <p className="prompt-message">Great work on your learning session!</p>
-                    
-                    {wordsForReviewCount > 0 ? (
-                        <p className="prompt-submessage">You have <strong>{wordsForReviewCount}</strong> word{wordsForReviewCount > 1 ? 's' : ''} ready for review. This is a great time to practice!</p>
-                    ) : (
-                         <p className="prompt-submessage">You have no words due for review right now. Excellent job!</p>
-                    )}
-                    
-                    <div className="prompt-actions">
-                         {wordsForReviewCount > 0 && (
-                            <button className="prompt-action-primary" onClick={onStartReview}>Start Review Session</button>
-                         )}
-                        <button className="prompt-action-secondary" onClick={onPrint}>Print Word List</button>
-                    </div>
-
-                    <p className="prompt-reminder">Spaced repetition helps you remember words long-term. Keep coming back to review!</p>
-                </div>
-                 <div className="modal-footer">
-                    <button className="secondary-btn" onClick={onClose}>Done for Now</button>
-                </div>
-            </motion.div>
-        </motion.div>
-    );
-};
-
-// --- NEW REVIEW SESSION COMPONENT ---
-const ReviewSession: React.FC<{ 
-    items: ReviewItem[], 
-    onClose: () => void,
-    onQuizComplete: (wordId: string, meaningIndex: number, isCorrect: boolean) => void 
-}> = ({ items, onClose, onQuizComplete }) => {
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [quizType, setQuizType] = useState<'gap' | 'mc' | 'flash'>('gap');
-    const [isComplete, setIsComplete] = useState(false);
-    
-    // States for the quiz itself
-    const [gapFillAnswer, setGapFillAnswer] = useState('');
-    const [isGapFillCorrect, setIsGapFillCorrect] = useState<boolean | null>(null);
-    const [mcAnswer, setMcAnswer] = useState<string | null>(null);
-    const [isFlashcardFlipped, setIsFlashcardFlipped] = useState(false);
-    const [flashcardResult, setFlashcardResult] = useState<'correct' | 'incorrect' | null>(null);
-
-    const modalRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        modalRef.current?.focus();
-    }, []);
-    
-    const currentItem = items[currentIndex];
-    
-    useEffect(() => {
-        // When the item changes, select a random quiz type
-        const types: ('gap' | 'mc' | 'flash')[] = ['gap', 'mc', 'flash'];
-        setQuizType(types[Math.floor(Math.random() * types.length)]);
-        // Reset all quiz states
-        setGapFillAnswer('');
-        setIsGapFillCorrect(null);
-        setMcAnswer(null);
-        setIsFlashcardFlipped(false);
-        setFlashcardResult(null);
-    }, [currentIndex, items]);
-
-    const handleNext = () => {
-        if (currentIndex < items.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-        } else {
-            setIsComplete(true);
-        }
-    };
-    
-    const isAnswered = isGapFillCorrect !== null || mcAnswer !== null || flashcardResult !== null;
-
-    if (items.length === 0) {
-        return ( 
-             <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} role="dialog" aria-modal="true">
-                <motion.div ref={modalRef} tabIndex={-1} className="modal-content review-session" initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} onClick={e => e.stopPropagation()}>
-                    <div className="modal-header"><h2>Review Session</h2><button className="close-btn" onClick={onClose} aria-label="Close review session">&times;</button></div>
-                    <div className="review-summary">
-                        <p>No words are due for review right now. Keep up the great work!</p>
-                        <button onClick={onClose}>Close</button>
-                    </div>
-                </motion.div>
-             </motion.div>
-        );
-    }
-
-    return (
-        <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-modal="true">
-            <motion.div ref={modalRef} tabIndex={-1} className="modal-content review-session" initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}>
-                {!isComplete ? (
-                    <>
-                        <div className="modal-header">
-                            <h2>Review Session</h2>
-                            <button className="close-btn" onClick={onClose} aria-label="Close review session">&times;</button>
-                        </div>
-                        <div className="review-progress">
-                            <div className="progress-bar" style={{ width: `${((currentIndex + 1) / items.length) * 100}%` }}></div>
-                        </div>
-                        <p className="progress-text">Word {currentIndex + 1} of {items.length}</p>
-
-                        <div className="review-quiz-area">
-                            {isAnswered ? (
-                                <h3>The word was: <strong>{currentItem.word}</strong></h3>
-                            ) : (
-                                <h3>Recall the word...</h3>
-                            )}
-                            {/* Re-using the quiz components' logic inside the review modal */}
-                            <div className="quiz-content">
-                                {quizType === 'gap' && (
-                                    <>
-                                      <p>{currentItem.meaning.gap_fill_prompt.replace('___', ' ______ ')}</p>
-                                      <div className="gap-fill-controls">
-                                          <input type="text" value={gapFillAnswer} onChange={(e) => setGapFillAnswer(e.target.value)} placeholder="Your answer" disabled={isAnswered} />
-                                          <button onClick={() => {
-                                              const isCorrect = gapFillAnswer.trim().toLowerCase() === currentItem.word.toLowerCase();
-                                              setIsGapFillCorrect(isCorrect);
-                                              onQuizComplete(currentItem.wordId, currentItem.meaningIndex, isCorrect);
-                                          }} disabled={isAnswered}>Check</button>
-                                      </div>
-                                      {isGapFillCorrect !== null && <QuizFeedbackAnimation isCorrect={isGapFillCorrect} correctMessage="Correct!" incorrectMessage={`Answer: "${currentItem.word}"`} />}
-                                    </>
-                                )}
-                                {quizType === 'mc' && (
-                                    <>
-                                        <p>"{currentItem.meaning.multiple_choice_prompt.replace('___', ' ______ ')}"</p>
-                                        <div className="mc-options">
-                                            {currentItem.meaning.multiple_choice.options.map((option, i) => (
-                                                <button key={i} onClick={() => {
-                                                    const isCorrect = option === currentItem.meaning.multiple_choice.correct_answer;
-                                                    setMcAnswer(option);
-                                                    onQuizComplete(currentItem.wordId, currentItem.meaningIndex, isCorrect);
-                                                }} disabled={isAnswered} className={`mc-option ${isAnswered && option === currentItem.meaning.multiple_choice.correct_answer ? 'correct' : ''} ${isAnswered && option !== currentItem.meaning.multiple_choice.correct_answer && option === mcAnswer ? 'incorrect' : ''}`}>
-                                                    {option}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        {mcAnswer !== null && <QuizFeedbackAnimation isCorrect={mcAnswer === currentItem.meaning.multiple_choice.correct_answer} correctMessage="Correct!" incorrectMessage={`Answer: "${currentItem.meaning.multiple_choice.correct_answer}"`}/>}
-                                    </>
-                                )}
-                                {quizType === 'flash' && (
-                                    <>
-                                     <div className="flashcard-container" onClick={() => setIsFlashcardFlipped(!isFlashcardFlipped)}>
-                                        <div className={`flashcard ${isFlashcardFlipped ? 'is-flipped' : ''}`}>
-                                            <div className="flashcard-face flashcard-front" dir="rtl">{currentItem.meaning.one_word_arabic}</div>
-                                            <div className="flashcard-face flashcard-back">{currentItem.word}</div>
-                                        </div>
-                                     </div>
-                                      <AnimatePresence>
-                                        {isFlashcardFlipped && flashcardResult === null && (
-                                            <motion.div className="flashcard-assessment" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                                                <button className="assess-correct" onClick={() => { setFlashcardResult('correct'); onQuizComplete(currentItem.wordId, currentItem.meaningIndex, true); }}>I knew it!</button>
-                                                <button className="assess-incorrect" onClick={() => { setFlashcardResult('incorrect'); onQuizComplete(currentItem.wordId, currentItem.meaningIndex, false); }}>Need practice</button>
-                                            </motion.div>
-                                        )}
-                                      </AnimatePresence>
-                                     {flashcardResult !== null && <QuizFeedbackAnimation isCorrect={flashcardResult === 'correct'} correctMessage="Great!" incorrectMessage="Keep practicing!"/>}
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                        
-                        {isAnswered && (
-                            <div className="modal-footer">
-                                <button onClick={handleNext}>
-                                    {currentIndex < items.length - 1 ? 'Next Word' : 'Finish Review'}
-                                </button>
-                            </div>
-                        )}
-                    </>
-                ) : (
-                    <div className="review-summary">
-                        <h2>Review Complete!</h2>
-                        <p>Great job reviewing {items.length} word{items.length > 1 ? 's' : ''}. Keep up the great work!</p>
-                        <button onClick={onClose}>Close</button>
-                    </div>
-                )}
-            </motion.div>
-        </motion.div>
-    );
-};
-
-
-const container = document.getElementById('root');
-if (container) {
-  const root = ReactDOM.createRoot(container);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error('Root container not found. Please ensure you have an element with id "root" in your HTML.');
-}
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+root.render(<React.StrictMode><App /></React.StrictMode>);
