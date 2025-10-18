@@ -4,7 +4,6 @@
 // - Handles multiple meanings and parts of speech for a single word.
 // - Interactive quizzes (Gap-Fill, Multiple Choice, Flashcard) for each meaning with enhanced feedback.
 // - AI-POWERED SPACED REPETITION: Intelligently schedules and reviews words based on user performance.
-// - AI-POWERED SPELL CHECK: Catches typos and suggests corrections before learning a word.
 // - Saves learned words and SRS data to localStorage for persistence.
 // - THEME SELECTOR: User can choose from multiple color schemes.
 // - Printable word list modal with CSV EXPORT.
@@ -160,7 +159,6 @@ const App: React.FC = () => {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [theme, setTheme] = useState<Theme>('violet-yellow');
-  const [spellSuggestion, setSpellSuggestion] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load vocab list and theme from localStorage on initial render
@@ -380,7 +378,6 @@ const App: React.FC = () => {
         setVocabList(prev => [newVocab, ...prev]);
         setWord('');
         inputRef.current?.focus();
-        setSpellSuggestion(null); // Clear suggestion on success
       } catch (e: any) {
         console.error("API Error:", e);
         let friendlyMessage = "Oops! Something went wrong. Please try again later.";
@@ -400,63 +397,20 @@ const App: React.FC = () => {
   const handleLearnWord = async () => {
     const wordToLearn = word.trim();
     if (!wordToLearn) return;
-    
+
     setIsLoading(true);
     setError(null);
-    setSpellSuggestion(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const spellCheckPromise = ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Is the English word "${wordToLearn}" spelled correctly? If it is correct, respond with only the word "correct". If it is misspelled, respond with only the single, most likely correct spelling.`,
-      });
-      
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Spell check request timed out. Please try again.")), 10000)
-      );
-      
-      const spellCheckResponse = await Promise.race([spellCheckPromise, timeoutPromise]);
-      const result = spellCheckResponse.text.trim().toLowerCase();
-
-      if (result.includes(' ') || result.length > 25 || result.length === 0) {
-          console.warn("Received unusual spell-check response, ignoring:", result);
-          await fetchVocabData(wordToLearn);
-          return;
-      }
-
-      if (result === 'correct' || result === wordToLearn.toLowerCase()) {
-        await fetchVocabData(wordToLearn);
-      } else {
-        setSpellSuggestion(result);
-      }
-    } catch (e: any) {
-      console.error("An error occurred during the learn word process. Trying original word as fallback.", e);
-      try {
-          await fetchVocabData(wordToLearn);
-      } catch (fallbackError) {
-          console.error("Fallback fetch also failed.", fallbackError);
-      }
+      await fetchVocabData(wordToLearn);
+    } catch (e) {
+      // The fetchVocabData function is responsible for setting the error message on the UI.
+      // We catch the error here to prevent it from crashing the app and to ensure the loading state is turned off.
+      console.error("An error occurred during the learn word process.", e);
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   };
-
-  const handleSuggestionChoice = async (useSuggestion: boolean) => {
-      const wordToLearn = useSuggestion && spellSuggestion ? spellSuggestion : word.trim();
-      if(useSuggestion && spellSuggestion) {
-          setWord(spellSuggestion); // Update input field
-      }
-      
-      setIsLoading(true);
-      try {
-        await fetchVocabData(wordToLearn);
-      } catch(e) {
-        console.error("Learning suggested word failed", e);
-      } finally {
-        setIsLoading(false);
-      }
-  }
 
   return (
     <div className={`app-container theme-${theme}`}>
@@ -481,24 +435,6 @@ const App: React.FC = () => {
         </button>
       </div>
       
-      <AnimatePresence>
-          {spellSuggestion && !isLoading && (
-              <motion.div
-                  className="spell-check-suggestion"
-                  initial={{ opacity: 0, y: -10, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: 'auto' }}
-                  exit={{ opacity: 0, y: -10, height: 0 }}
-                  transition={{ duration: 0.3 }}
-              >
-                  <p>Did you mean: <strong>{spellSuggestion}</strong>?</p>
-                  <div className="suggestion-buttons">
-                      <button className="accept-btn" onClick={() => handleSuggestionChoice(true)}>Yes, use suggestion</button>
-                      <button className="ignore-btn" onClick={() => handleSuggestionChoice(false)}>No, learn "{word}"</button>
-                  </div>
-              </motion.div>
-          )}
-      </AnimatePresence>
-
       {error && <div className="error-message">{error}</div>}
 
       <div className="controls-area">

@@ -183,59 +183,6 @@ body {
   filter: brightness(100%);
 }
 
-/* Spell Check Suggestion */
-.spell-check-suggestion {
-  background-color: var(--secondary-color_15, rgba(255, 190, 11, 0.15));
-  border: 1px solid var(--secondary-color);
-  padding: 1rem;
-  border-radius: 8px;
-  margin: -0.5rem 0 1rem 0; /* Position between input and error */
-  text-align: center;
-  font-weight: 500;
-  overflow: hidden;
-}
-.theme-violet-yellow .spell-check-suggestion { --secondary-color_15: rgba(255, 190, 11, 0.15); }
-.theme-blue-green .spell-check-suggestion { --secondary-color_15: rgba(144, 190, 109, 0.15); }
-.theme-monochromatic .spell-check-suggestion { --secondary-color_15: rgba(173, 181, 189, 0.15); }
-
-.spell-check-suggestion p {
-  margin-bottom: 0.75rem;
-  color: var(--text-color);
-}
-.spell-check-suggestion strong {
-    color: var(--primary-color);
-}
-.suggestion-buttons {
-    display: flex;
-    justify-content: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-}
-.suggestion-buttons button {
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    font-weight: 700;
-    transition: all 0.2s;
-}
-.accept-btn {
-    background-color: var(--success-color);
-    color: white;
-}
-.accept-btn:hover {
-    filter: brightness(90%);
-}
-.ignore-btn {
-    background-color: transparent;
-    border: 1px solid var(--text-light);
-    color: var(--text-light);
-}
-.ignore-btn:hover {
-    background-color: var(--border-color);
-}
-
-
 /* Error Message */
 .error-message {
   background-color: var(--error-color_10, rgba(239, 71, 111, 0.1));
