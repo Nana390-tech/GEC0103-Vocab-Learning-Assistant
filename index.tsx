@@ -8,10 +8,12 @@
 // - THEME SELECTOR: User can choose from multiple color schemes.
 // - Printable word list modal with CSV EXPORT.
 // - Robust error handling for API calls.
+// - NEW: Audio pronunciation for each word using Gemini Text-to-Speech.
+// - NEW: Smart duplicate handling to prevent re-adding existing words.
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, Modality } from '@google/genai';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TYPE DEFINITIONS ---
@@ -119,6 +121,13 @@ const StarIcon: React.FC<{ style?: React.CSSProperties }> = ({ style }) => (
     </motion.svg>
 );
 
+const SpeakerIcon: React.FC<{ style?: React.CSSProperties }> = ({ style }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+    </svg>
+);
+
 // --- UTILITY FUNCTIONS ---
 
 /**
@@ -145,6 +154,36 @@ const validateApiResponse = (data: any): { meanings: any[] } => {
 
     return data;
 };
+
+// --- AUDIO DECODING UTILITIES ---
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
 
 
 // --- REACT COMPONENTS ---
@@ -417,14 +456,29 @@ const App: React.FC = () => {
 
 
   const handleLearnWord = async () => {
-    const wordToLearn = word.trim();
+    const wordToLearn = word.trim().toLowerCase();
     if (!wordToLearn) return;
+
+    // --- Smart Duplicate Handling ---
+    const existingEntry = vocabList.find(item => item.word.toLowerCase() === wordToLearn);
+    if (existingEntry) {
+        const element = document.querySelector(`[data-word-id="${existingEntry.id}"]`) as HTMLElement;
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-card');
+            setTimeout(() => {
+                element.classList.remove('highlight-card');
+            }, 1500);
+        }
+        setWord('');
+        return;
+    }
 
     setIsLoading(true);
     setError(null);
 
     try {
-      await fetchVocabData(wordToLearn);
+      await fetchVocabData(word.trim());
     } catch (e) {
       // The fetchVocabData function is responsible for setting the error message on the UI.
       // We catch the error here to prevent it from crashing the app and to ensure the loading state is turned off.
@@ -474,6 +528,7 @@ const App: React.FC = () => {
             type="text"
             value={word}
             onChange={(e) => setWord(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLearnWord()}
             placeholder="e.g., happy, run, book"
             aria-label="Enter a word"
             disabled={isLoading}
@@ -541,10 +596,62 @@ const ThemeSelector: React.FC<{ currentTheme: Theme; onThemeChange: (theme: Them
 
 
 const VocabCard: React.FC<{ vocabData: VocabData, onQuizComplete: (wordId: string, meaningIndex: number, isCorrect: boolean) => void }> = ({ vocabData, onQuizComplete }) => {
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+
+  const handlePlayPronunciation = async () => {
+    if (isAudioLoading) return;
+    setIsAudioLoading(true);
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text: vocabData.word }] }],
+            config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: 'Kore' },
+                    },
+                },
+            },
+        });
+        
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (base64Audio) {
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+            const audioBuffer = await decodeAudioData(
+                decode(base64Audio),
+                audioContext,
+                24000,
+                1,
+            );
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start();
+        } else {
+            throw new Error("No audio data received from API.");
+        }
+    } catch (err) {
+        console.error("Failed to play pronunciation:", err);
+    } finally {
+        setIsAudioLoading(false);
+    }
+  };
+
   return (
-    <div className="vocab-card">
+    <div className="vocab-card" data-word-id={vocabData.id}>
       <div className="vocab-header">
         <h2>{vocabData.word}</h2>
+        <button 
+            className={`pronunciation-btn ${isAudioLoading ? 'loading' : ''}`} 
+            onClick={handlePlayPronunciation} 
+            disabled={isAudioLoading}
+            aria-label={`Listen to pronunciation of ${vocabData.word}`}
+        >
+            <SpeakerIcon />
+        </button>
       </div>
       
       {vocabData.meanings.map((meaning, index) => (
@@ -689,6 +796,7 @@ const MeaningCard: React.FC<{
                                 type="text"
                                 value={gapFillAnswer}
                                 onChange={(e) => setGapFillAnswer(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && checkGapFill()}
                                 placeholder="Your answer"
                                 aria-label="Gap-fill answer"
                                 disabled={isGapFillCorrect !== null}

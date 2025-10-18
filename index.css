@@ -268,8 +268,16 @@ body.theme-monochromatic .error-message { --error-color_10: rgba(220, 53, 69, 0.
   padding: 1.5rem;
   overflow: hidden;
   border-top: 4px solid var(--primary-color);
+  transition: box-shadow 0.4s ease-in-out, transform 0.4s ease-in-out;
+}
+.vocab-card.highlight-card {
+  box-shadow: 0 0 0 4px var(--secondary-color), var(--shadow);
+  transform: scale(1.02);
 }
 .vocab-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 1rem;
   margin-bottom: 1rem;
@@ -278,6 +286,51 @@ body.theme-monochromatic .error-message { --error-color_10: rgba(220, 53, 69, 0.
   font-size: 2.25rem;
   font-weight: 700;
   color: var(--text-color);
+  margin: 0;
+}
+
+/* NEW: Pronunciation Button */
+.pronunciation-btn {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  transition: background-color 0.2s, transform 0.2s;
+}
+
+.pronunciation-btn:hover:not(:disabled) {
+  background-color: var(--primary-color_10, rgba(131, 56, 236, 0.1));
+  transform: scale(1.1);
+}
+body.theme-violet-yellow .pronunciation-btn { --primary-color_10: rgba(131, 56, 236, 0.1); --primary-color_20: rgba(131, 56, 236, 0.2); }
+body.theme-blue-green .pronunciation-btn { --primary-color_10: rgba(45, 125, 210, 0.1); --primary-color_20: rgba(45, 125, 210, 0.2); }
+body.theme-monochromatic .pronunciation-btn { --primary-color_10: rgba(52, 58, 64, 0.1); --primary-color_20: rgba(52, 58, 64, 0.2); }
+
+
+.pronunciation-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.pronunciation-btn.loading {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--primary-color_20);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(131, 56, 236, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(131, 56, 236, 0);
+  }
 }
 
 /* Meaning Container */
