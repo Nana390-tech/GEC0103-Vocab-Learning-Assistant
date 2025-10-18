@@ -669,6 +669,14 @@ body {
   overflow-y: auto;
   flex-grow: 1;
 }
+.modal-body a {
+  color: var(--primary-color);
+  font-weight: 500;
+  text-decoration: none;
+}
+.modal-body a:hover {
+  text-decoration: underline;
+}
 .word-table {
   width: 100%;
   border-collapse: collapse;

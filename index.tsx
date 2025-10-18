@@ -148,6 +148,44 @@ const validateApiResponse = (data: any): { meanings: any[] } => {
 
 
 // --- REACT COMPONENTS ---
+const ApiKeyModal: React.FC<{ onKeySelect: () => void }> = ({ onKeySelect }) => {
+    return (
+        <motion.div 
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+        >
+            <motion.div 
+                className="modal-content"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -50, opacity: 0 }}
+                style={{ maxWidth: '500px', textAlign: 'center' }}
+            >
+                <div className="modal-header">
+                    <h2>API Key Required</h2>
+                </div>
+                <div className="modal-body">
+                    <p style={{ margin: '1rem 0 1.5rem' }}>
+                        Please select your Gemini API key to use this application.
+                    </p>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', marginBottom: '1.5rem' }}>
+                        For more information on setting up your API key and enabling billing, please refer to the{' '}
+                        <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">
+                            official documentation
+                        </a>.
+                    </p>
+                    <button onClick={onKeySelect} className="prompt-action-primary" style={{ width: '80%', fontSize: '1rem', padding: '0.75rem' }}>
+                        Select API Key
+                    </button>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+};
 
 const App: React.FC = () => {
   const [vocabList, setVocabList] = useState<VocabData[]>([]);
@@ -159,7 +197,19 @@ const App: React.FC = () => {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [theme, setTheme] = useState<Theme>('violet-yellow');
+  const [isKeySelected, setIsKeySelected] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check for API key on mount
+  useEffect(() => {
+    const checkApiKey = async () => {
+        if (window.aistudio) {
+            const hasKey = await window.aistudio.hasSelectedApiKey();
+            setIsKeySelected(hasKey);
+        }
+    };
+    checkApiKey();
+  }, []);
 
   // Load vocab list and theme from localStorage on initial render
   useEffect(() => {
@@ -216,6 +266,14 @@ const App: React.FC = () => {
     }
   }, [theme]);
   
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        // Assume success to handle potential race condition and immediately update UI
+        setIsKeySelected(true);
+    }
+  };
+
   const handleQuizComplete = (wordId: string, meaningIndex: number, isCorrect: boolean) => {
       setVocabList(currentList => {
           return currentList.map(item => {
@@ -382,8 +440,12 @@ const App: React.FC = () => {
         console.error("API Error:", e);
         let friendlyMessage = "Oops! Something went wrong. Please try again later.";
         if (e && e.message) {
-          // Provide a more specific error message from the SDK to aid in debugging configuration issues.
           friendlyMessage = `API Error: ${e.message}`;
+           // Handle specific API key errors and prompt for re-selection.
+          if (e.message.includes("API Key must be set") || e.message.includes("Requested entity was not found")) {
+              friendlyMessage = "Your API key appears to be invalid. Please select a valid key to continue.";
+              setIsKeySelected(false);
+          }
         }
         setError(friendlyMessage);
         throw e; // Re-throw so the calling function can handle loading state.
@@ -410,58 +472,10 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className={`app-container theme-${theme}`}>
-      <header className="app-header">
-        <h1>Vocab Learning Assistant</h1>
-        <p>Enter an English word to learn its meaning in Arabic, usage, and example.</p>
-        <ThemeSelector currentTheme={theme} onThemeChange={setTheme} />
-      </header>
-      
-      <div className="input-area">
-        <input
-          ref={inputRef}
-          type="text"
-          value={word}
-          onChange={(e) => setWord(e.target.value)}
-          placeholder="e.g., happy, run, book"
-          aria-label="Enter a word"
-          disabled={isLoading}
-        />
-        <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
-          {isLoading ? <div className="spinner"></div> : 'Learn Word'}
-        </button>
-      </div>
-      
-      {error && <div className="error-message">{error}</div>}
-
-      <div className="controls-area">
-         <button className="finish-btn" onClick={() => setShowReviewPrompt(true)} disabled={isLoading || vocabList.length === 0}>
-          Finish Session
-        </button>
-        <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={isLoading || vocabList.length === 0}>
-          View Word List ({vocabList.length})
-        </button>
-        <button className="clear-btn" onClick={handleClearList} disabled={isLoading || vocabList.length === 0}>
-          Clear List
-        </button>
-      </div>
-      
-      <main className="vocab-list">
-        <AnimatePresence>
-          {vocabList.map(item => (
-            <motion.div
-              key={item.id}
-              layout
-              initial={{ opacity: 0, y: 50, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
-            >
-              <VocabCard vocabData={item} onQuizComplete={handleQuizComplete}/>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </main>
+    <>
+      <AnimatePresence>
+        {!isKeySelected && <ApiKeyModal onKeySelect={handleSelectKey} />}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showReviewPrompt && (
@@ -487,11 +501,72 @@ const App: React.FC = () => {
       <AnimatePresence>
         {isReviewing && <ReviewSession key="review-session-modal" items={reviewItems} onClose={() => setIsReviewing(false)} onQuizComplete={handleQuizComplete} />}
       </AnimatePresence>
+      
+      <div 
+        className={`app-container theme-${theme}`}
+        style={{
+          filter: !isKeySelected ? 'blur(4px)' : 'none',
+          transition: 'filter 0.3s'
+        }}
+        aria-hidden={!isKeySelected}
+      >
+        <header className="app-header">
+          <h1>Vocab Learning Assistant</h1>
+          <p>Enter an English word to learn its meaning in Arabic, usage, and example.</p>
+          <ThemeSelector currentTheme={theme} onThemeChange={setTheme} />
+        </header>
+        
+        <div className="input-area">
+          <input
+            ref={inputRef}
+            type="text"
+            value={word}
+            onChange={(e) => setWord(e.target.value)}
+            placeholder="e.g., happy, run, book"
+            aria-label="Enter a word"
+            disabled={isLoading || !isKeySelected}
+          />
+          <button onClick={handleLearnWord} disabled={isLoading || !word.trim() || !isKeySelected}>
+            {isLoading ? <div className="spinner"></div> : 'Learn Word'}
+          </button>
+        </div>
+        
+        {error && <div className="error-message">{error}</div>}
 
-      <footer className="app-footer">
-          Designed by: Nazila Motahari
-      </footer>
-    </div>
+        <div className="controls-area">
+          <button className="finish-btn" onClick={() => setShowReviewPrompt(true)} disabled={isLoading || vocabList.length === 0}>
+            Finish Session
+          </button>
+          <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={isLoading || vocabList.length === 0}>
+            View Word List ({vocabList.length})
+          </button>
+          <button className="clear-btn" onClick={handleClearList} disabled={isLoading || vocabList.length === 0}>
+            Clear List
+          </button>
+        </div>
+        
+        <main className="vocab-list">
+          <AnimatePresence>
+            {vocabList.map(item => (
+              <motion.div
+                key={item.id}
+                layout
+                initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+              >
+                <VocabCard vocabData={item} onQuizComplete={handleQuizComplete}/>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </main>
+
+        <footer className="app-footer">
+            Designed by: Nazila Motahari
+        </footer>
+      </div>
+    </>
   );
 };
 
