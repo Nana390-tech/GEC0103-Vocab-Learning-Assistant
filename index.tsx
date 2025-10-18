@@ -807,10 +807,14 @@ const App: React.FC = () => {
 
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        
+        const systemInstruction = `You are an expert linguist and teacher who helps Arabic speakers learn English. For a given English word, provide a JSON object with its most common meanings, tailored for an A2-level learner. The output must strictly adhere to the provided JSON schema. Do not output anything other than the JSON object.`;
+
         const vocabPromise = ai.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: `For the English word "${wordToLearn}", provide its most common meanings for an A2-level English language learner. For each meaning, provide a single Arabic word synonym, a more detailed Arabic explanation, and unique sentences for the example, the gap-fill quiz, and the multiple-choice quiz. If the word has multiple distinct meanings (e.g., as a noun and a verb), provide each one.`,
+          contents: `Generate vocabulary data for the English word: "${wordToLearn}"`,
           config: {
+            systemInstruction,
             responseMimeType: 'application/json',
             responseSchema: schema,
           },
