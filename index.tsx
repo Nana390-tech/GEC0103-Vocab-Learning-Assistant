@@ -18,20 +18,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TYPE DEFINITIONS ---
 
-// Add aistudio to the global window interface for TypeScript
-// FIX: The property 'aistudio' on 'Window' must be of type 'AIStudio'.
-// Renaming 'AppAIStudio' to 'AIStudio' to match the existing global type and allow for declaration merging.
-interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-}
-
-declare global {
-    interface Window {
-        aistudio?: AIStudio;
-    }
-}
-
 interface MultipleChoice {
   options: string[];
   correct_answer: string;
@@ -163,35 +149,6 @@ const validateApiResponse = (data: any): { meanings: any[] } => {
 };
 
 // --- REACT COMPONENTS ---
-
-const ApiKeyPrompt: React.FC<{ onKeySelect: () => void }> = ({ onKeySelect }) => {
-    const handleSelectKey = async () => {
-        if (window.aistudio) {
-            await window.aistudio.openSelectKey();
-            // Assume success and let the parent component handle the state change
-            onKeySelect();
-        } else {
-            // Fallback for environments where aistudio is not available
-            alert("API key selection is not available in this environment.");
-        }
-    };
-
-    return (
-        <div className="api-key-prompt-overlay">
-            <motion.div 
-                className="api-key-prompt-content"
-                initial={{ y: -50, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-            >
-                <h2>API Key Required</h2>
-                <p>To use the AI features of this app, you need to select a Gemini API key. Your key is stored securely and only used for your session.</p>
-                <p>For information on pricing and setting up a key, please visit the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">Gemini API billing documentation</a>.</p>
-                <button onClick={handleSelectKey}>Select API Key</button>
-            </motion.div>
-        </div>
-    );
-};
 
 const ThemeSelector: React.FC<{ currentTheme: Theme; onThemeChange: (theme: Theme) => void; }> = ({ currentTheme, onThemeChange }) => (
     <div className="theme-selector" title="Change Theme">
@@ -641,19 +598,7 @@ const App: React.FC = () => {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [theme, setTheme] = useState<Theme>('violet-yellow');
-  const [isApiKeySelected, setIsApiKeySelected] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Check for API key on initial load
-  useEffect(() => {
-    const checkApiKey = async () => {
-        if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-            setIsApiKeySelected(true);
-        }
-    };
-    checkApiKey();
-  }, []);
-
 
   // Load vocab list and theme from localStorage on initial render
   useEffect(() => {
@@ -735,12 +680,9 @@ const App: React.FC = () => {
     console.error("API Error:", e);
     const message = e?.message || '';
 
-    if (message.includes("Requested entity was not found") || message.includes("API key not valid")) {
-        setError("Your API key seems to be invalid. Please select a new key to continue.");
-        setIsApiKeySelected(false);
-    } else if (message.includes("API Key must be set")) {
-        setError("An API key is required. Please select one to proceed.");
-        setIsApiKeySelected(false);
+    // Since the user cannot change the API key, show a generic error for key-related issues.
+    if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
+        setError("Could not connect to the learning service due to a configuration issue. Please try again later.");
     } else {
         const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
         setError(friendlyMessage);
@@ -951,13 +893,6 @@ const App: React.FC = () => {
   return (
     <>
       <AnimatePresence>
-        {!isApiKeySelected && <ApiKeyPrompt onKeySelect={() => {
-            setIsApiKeySelected(true);
-            setError(null); // Clear previous API key errors
-        }} />}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {showReviewPrompt && (
             <ReviewPromptModal
                 key="review-prompt-modal"
@@ -982,7 +917,7 @@ const App: React.FC = () => {
         {isReviewing && <ReviewSession key="review-session-modal" items={reviewItems} onClose={() => setIsReviewing(false)} onQuizComplete={handleQuizComplete} />}
       </AnimatePresence>
       
-      <div className="app-container" style={{ filter: isApiKeySelected ? 'none' : 'blur(4px)'}}>
+      <div className="app-container">
         <header className="app-header">
           <h1>Vocab Learning Assistant</h1>
           <p>Enter an English word to learn its meaning in Arabic, usage, and example.</p>
@@ -998,9 +933,9 @@ const App: React.FC = () => {
             onKeyDown={(e) => e.key === 'Enter' && handleLearnWord()}
             placeholder="e.g., happy, run, book"
             aria-label="Enter an English word"
-            disabled={isLoading || !isApiKeySelected}
+            disabled={isLoading}
           />
-          <button onClick={handleLearnWord} disabled={isLoading || !word.trim() || !isApiKeySelected}>
+          <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
             {isLoading ? <div className="spinner"></div> : 'Learn Word'}
           </button>
         </div>
