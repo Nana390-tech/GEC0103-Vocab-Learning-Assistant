@@ -381,15 +381,12 @@ const App: React.FC = () => {
       } catch (e: any) {
         console.error("API Error:", e);
         let friendlyMessage = "Oops! Something went wrong. Please try again later.";
-        if (e.message) {
-          if (e.message.toLowerCase().includes('api key')) {
-             friendlyMessage = "There seems to be an issue with the API key. Please ensure it's configured correctly.";
-          } else {
-             friendlyMessage = e.message;
-          }
+        if (e && e.message) {
+          // Provide a more specific error message from the SDK to aid in debugging configuration issues.
+          friendlyMessage = `API Error: ${e.message}`;
         }
         setError(friendlyMessage);
-        throw e; // Re-throw the error for the caller to handle
+        throw e; // Re-throw so the calling function can handle loading state.
       }
   };
 
