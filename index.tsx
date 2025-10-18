@@ -148,45 +148,6 @@ const validateApiResponse = (data: any): { meanings: any[] } => {
 
 
 // --- REACT COMPONENTS ---
-const ApiKeyModal: React.FC<{ onKeySelect: () => void }> = ({ onKeySelect }) => {
-    return (
-        <motion.div 
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            role="dialog"
-            aria-modal="true"
-        >
-            <motion.div 
-                className="modal-content"
-                initial={{ y: -50, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -50, opacity: 0 }}
-                style={{ maxWidth: '500px', textAlign: 'center' }}
-            >
-                <div className="modal-header">
-                    <h2>API Key Required</h2>
-                </div>
-                <div className="modal-body">
-                    <p style={{ margin: '1rem 0 1.5rem' }}>
-                        Please select your Gemini API key to use this application.
-                    </p>
-                    <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', marginBottom: '1.5rem' }}>
-                        For more information on setting up your API key and enabling billing, please refer to the{' '}
-                        <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">
-                            official documentation
-                        </a>.
-                    </p>
-                    <button onClick={onKeySelect} className="prompt-action-primary" style={{ width: '80%', fontSize: '1rem', padding: '0.75rem' }}>
-                        Select API Key
-                    </button>
-                </div>
-            </motion.div>
-        </motion.div>
-    );
-};
-
 const App: React.FC = () => {
   const [vocabList, setVocabList] = useState<VocabData[]>([]);
   const [word, setWord] = useState('');
@@ -197,19 +158,8 @@ const App: React.FC = () => {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [theme, setTheme] = useState<Theme>('violet-yellow');
-  const [isKeySelected, setIsKeySelected] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check for API key on mount
-  useEffect(() => {
-    const checkApiKey = async () => {
-        if (window.aistudio) {
-            const hasKey = await window.aistudio.hasSelectedApiKey();
-            setIsKeySelected(hasKey);
-        }
-    };
-    checkApiKey();
-  }, []);
 
   // Load vocab list and theme from localStorage on initial render
   useEffect(() => {
@@ -222,20 +172,38 @@ const App: React.FC = () => {
               return;
           }
           const parsedList: any[] = parsedData;
-          // Data migration for users with old data structure
-          // FIX: Add checks to ensure item and its meanings are objects before spreading to prevent runtime errors with malformed data.
+          
+          // Robust data migration and validation to prevent crashes from malformed localStorage data.
           const migratedList = parsedList
-            .filter(item => typeof item === 'object' && item !== null && Array.isArray(item.meanings))
-            .map(item => ({
-              ...item,
-              meanings: item.meanings.map((m: any) => {
-                  if (typeof m !== 'object' || m === null) return null;
+            .filter(item => typeof item === 'object' && item !== null && Array.isArray(item.meanings) && typeof item.word === 'string')
+            .map(item => {
+              const validMeanings = item.meanings.map((m: any) => {
+                  // Ensure 'm' is a proper object and not an array or null.
+                  if (typeof m !== 'object' || m === null || Array.isArray(m)) return null;
+
+                  // Check for nested properties that are critical for rendering to prevent crashes.
+                  if (!m.multiple_choice || typeof m.multiple_choice !== 'object' || !Array.isArray(m.multiple_choice.options)) {
+                      console.warn("Filtering out malformed meaning from localStorage due to invalid 'multiple_choice' structure:", m);
+                      return null;
+                  }
+                  
+                  // Ensure other critical fields are present.
+                  if (typeof m.gap_fill_prompt !== 'string' || typeof m.one_word_arabic !== 'string') {
+                      console.warn("Filtering out malformed meaning from localStorage due to missing critical properties:", m);
+                      return null;
+                  }
+
                   const hasSrsData = 'srs_level' in m && 'next_review_date' in m;
                   if (hasSrsData) return m;
+
                   // If old data, initialize SRS properties
                   return { ...m, srs_level: 0, next_review_date: Date.now() };
-              }).filter(Boolean)
-          }));
+              }).filter(Boolean); // Filter out any nulls from invalid meanings
+
+              return { ...item, meanings: validMeanings };
+            })
+            .filter(item => item.meanings.length > 0); // Remove words that have no valid meanings left
+
           setVocabList(migratedList);
       }
       
@@ -245,6 +213,8 @@ const App: React.FC = () => {
       }
     } catch (e) {
       console.error("Failed to load from localStorage", e);
+      // If parsing fails, clear the corrupted data to prevent future errors.
+      localStorage.removeItem('vocabList');
     }
   }, []);
 
@@ -257,22 +227,16 @@ const App: React.FC = () => {
     }
   }, [vocabList]);
 
-  // Save theme to localStorage whenever it changes
+  // Save theme to localStorage and apply to body whenever it changes
   useEffect(() => {
     try {
       localStorage.setItem('vocabTheme', theme);
+      document.body.className = `theme-${theme}`;
     } catch (e) {
       console.error("Failed to save theme to localStorage", e);
     }
   }, [theme]);
   
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        // Assume success to handle potential race condition and immediately update UI
-        setIsKeySelected(true);
-    }
-  };
 
   const handleQuizComplete = (wordId: string, meaningIndex: number, isCorrect: boolean) => {
       setVocabList(currentList => {
@@ -341,7 +305,6 @@ const App: React.FC = () => {
   }, [vocabList]);
 
   const fetchVocabData = async (wordToLearn: string) => {
-      setError(null);
       const schema = {
         type: Type.OBJECT,
         properties: {
@@ -438,16 +401,16 @@ const App: React.FC = () => {
         inputRef.current?.focus();
       } catch (e: any) {
         console.error("API Error:", e);
-        let friendlyMessage = "Oops! Something went wrong. Please try again later.";
-        if (e && e.message) {
-          friendlyMessage = `API Error: ${e.message}`;
-           // Handle specific API key errors and prompt for re-selection.
-          if (e.message.includes("API Key must be set") || e.message.includes("Requested entity was not found")) {
-              friendlyMessage = "Your API key appears to be invalid. Please select a valid key to continue.";
-              setIsKeySelected(false);
-          }
+        // Re-map common API key errors to a user-friendly message.
+        if (e && e.message && (e.message.includes("API Key must be set") || e.message.includes("API key not valid")  || e.message.includes("Requested entity was not found"))) {
+            setError("API Error: The API key is missing or invalid. Please ensure it is configured correctly.");
+        } else {
+            let friendlyMessage = "Oops! Something went wrong. Please try again later.";
+            if (e && e.message) {
+                friendlyMessage = `API Error: ${e.message}`;
+            }
+            setError(friendlyMessage);
         }
-        setError(friendlyMessage);
         throw e; // Re-throw so the calling function can handle loading state.
       }
   };
@@ -474,10 +437,6 @@ const App: React.FC = () => {
   return (
     <>
       <AnimatePresence>
-        {!isKeySelected && <ApiKeyModal onKeySelect={handleSelectKey} />}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {showReviewPrompt && (
             <ReviewPromptModal
                 key="review-prompt-modal"
@@ -502,14 +461,7 @@ const App: React.FC = () => {
         {isReviewing && <ReviewSession key="review-session-modal" items={reviewItems} onClose={() => setIsReviewing(false)} onQuizComplete={handleQuizComplete} />}
       </AnimatePresence>
       
-      <div 
-        className={`app-container theme-${theme}`}
-        style={{
-          filter: !isKeySelected ? 'blur(4px)' : 'none',
-          transition: 'filter 0.3s'
-        }}
-        aria-hidden={!isKeySelected}
-      >
+      <div className="app-container">
         <header className="app-header">
           <h1>Vocab Learning Assistant</h1>
           <p>Enter an English word to learn its meaning in Arabic, usage, and example.</p>
@@ -524,9 +476,9 @@ const App: React.FC = () => {
             onChange={(e) => setWord(e.target.value)}
             placeholder="e.g., happy, run, book"
             aria-label="Enter a word"
-            disabled={isLoading || !isKeySelected}
+            disabled={isLoading}
           />
-          <button onClick={handleLearnWord} disabled={isLoading || !word.trim() || !isKeySelected}>
+          <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
             {isLoading ? <div className="spinner"></div> : 'Learn Word'}
           </button>
         </div>
