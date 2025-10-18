@@ -17,7 +17,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TYPE DEFINITIONS ---
-
 interface MultipleChoice {
   options: string[];
   correct_answer: string;
@@ -680,8 +679,8 @@ const App: React.FC = () => {
     console.error("API Error:", e);
     const message = e?.message || '';
 
-    // Since the user cannot change the API key, show a generic error for key-related issues.
     if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
+        // For API key issues, show a generic configuration error.
         setError("Could not connect to the learning service due to a configuration issue. Please try again later.");
     } else {
         const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
