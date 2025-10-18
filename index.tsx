@@ -284,7 +284,6 @@ const App: React.FC = () => {
 
   const fetchVocabData = async (wordToLearn: string) => {
       setError(null);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const schema = {
         type: Type.OBJECT,
         properties: {
@@ -336,6 +335,7 @@ const App: React.FC = () => {
       };
 
       try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const vocabPromise = ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: `For the English word "${wordToLearn}", provide its most common meanings for an A2-level English language learner. For each meaning, provide a single Arabic word synonym, a more detailed Arabic explanation, and unique sentences for the example, the gap-fill quiz, and the multiple-choice quiz. If the word has multiple distinct meanings (e.g., as a noun and a verb), provide each one.`,
