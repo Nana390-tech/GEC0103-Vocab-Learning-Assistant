@@ -843,7 +843,6 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
     cursor: pointer;
 }
 
-
 /* Spinner */
 .spinner {
   border: 4px solid rgba(255, 255, 255, 0.3);

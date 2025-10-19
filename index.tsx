@@ -9,7 +9,6 @@
 // - Printable word list modal with CSV EXPORT.
 // - Robust error handling for API calls.
 // - Smart duplicate handling to prevent re-adding existing words.
-// - Robust API key selection and validation flow.
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
@@ -17,6 +16,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TYPE DEFINITIONS ---
+
 interface MultipleChoice {
   options: string[];
   correct_answer: string;
@@ -679,9 +679,9 @@ const App: React.FC = () => {
     console.error("API Error:", e);
     const message = e?.message || '';
 
+    // If it's an API key issue, show a generic error as the user can't fix it.
     if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
-        // For API key issues, show a generic configuration error.
-        setError("Could not connect to the learning service due to a configuration issue. Please try again later.");
+        setError("The learning service is currently unavailable. Please try again later.");
     } else {
         const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
         setError(friendlyMessage);
