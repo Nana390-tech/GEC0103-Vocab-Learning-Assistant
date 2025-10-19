@@ -679,7 +679,6 @@ const App: React.FC = () => {
     console.error("API Error:", e);
     const message = e?.message || '';
 
-    // If it's an API key issue, show a generic error as the user can't fix it.
     if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
         setError("The learning service is currently unavailable. Please try again later.");
     } else {
@@ -927,57 +926,59 @@ const App: React.FC = () => {
           <ThemeSelector currentTheme={theme} onThemeChange={setTheme} />
         </header>
         
-        <div className="input-area">
-          <input
-            ref={inputRef}
-            type="text"
-            value={word}
-            onChange={(e) => setWord(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLearnWord()}
-            placeholder="e.g., happy, run, book"
-            aria-label="Enter an English word"
-            disabled={isLoading}
-          />
-          <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
-            {isLoading ? <div className="spinner"></div> : 'Learn Word'}
-          </button>
-        </div>
-
         {error && <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             className="error-message"
         >{error}</motion.div>}
 
-        <div className="controls-area">
-            <button className="clear-btn" onClick={handleClearList} disabled={vocabList.length === 0}>Clear List</button>
-            <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={vocabList.length === 0}>My Words</button>
-            <button
-                className="finish-btn"
-                onClick={() => {
-                    if (wordsForReviewCount > 0) {
-                        setShowReviewPrompt(true);
-                    } else {
-                        alert("You have no words due for review right now. Keep learning!");
-                    }
-                }}
-                disabled={vocabList.length === 0}
-            >
-                Review ({wordsForReviewCount})
+        <>
+            <div className="input-area">
+            <input
+                ref={inputRef}
+                type="text"
+                value={word}
+                onChange={(e) => setWord(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLearnWord()}
+                placeholder="e.g., happy, run, book"
+                aria-label="Enter an English word"
+                disabled={isLoading}
+            />
+            <button onClick={handleLearnWord} disabled={isLoading || !word.trim()}>
+                {isLoading ? <div className="spinner"></div> : 'Learn Word'}
             </button>
-        </div>
+            </div>
 
-        <AnimatePresence>
-          <div className="vocab-list">
-            {vocabList.map((vocab) => (
-              <VocabCard
-                key={vocab.id}
-                vocab={vocab}
-                handleQuizComplete={(meaningIndex, isCorrect) => handleQuizComplete(vocab.id, meaningIndex, isCorrect)}
-              />
-            ))}
-          </div>
-        </AnimatePresence>
+            <div className="controls-area">
+                <button className="clear-btn" onClick={handleClearList} disabled={vocabList.length === 0}>Clear List</button>
+                <button className="secondary-btn" onClick={() => setIsModalOpen(true)} disabled={vocabList.length === 0}>My Words</button>
+                <button
+                    className="finish-btn"
+                    onClick={() => {
+                        if (wordsForReviewCount > 0) {
+                            setShowReviewPrompt(true);
+                        } else {
+                            alert("You have no words due for review right now. Keep learning!");
+                        }
+                    }}
+                    disabled={vocabList.length === 0}
+                >
+                    Review ({wordsForReviewCount})
+                </button>
+            </div>
+
+            <div className="vocab-list">
+                <AnimatePresence>
+                    {vocabList.map((vocab) => (
+                    <VocabCard
+                        key={vocab.id}
+                        vocab={vocab}
+                        handleQuizComplete={(meaningIndex, isCorrect) => handleQuizComplete(vocab.id, meaningIndex, isCorrect)}
+                    />
+                    ))}
+                </AnimatePresence>
+            </div>
+        </>
 
         <footer className="app-footer">
           <p>Designed by Nazila Motahari | Powered by Gemini. Happy Learning!</p>
