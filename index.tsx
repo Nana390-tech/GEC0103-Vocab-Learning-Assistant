@@ -756,7 +756,7 @@ const App: React.FC = () => {
     const message = e?.message || '';
 
     if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
-        setError("The learning service is currently unavailable. Please try again later.");
+        setError("There was a problem connecting to the learning service due to a configuration issue. Please try again later.");
     } else {
         const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
         setError(friendlyMessage);
@@ -770,14 +770,18 @@ const App: React.FC = () => {
                   const newMeanings = [...item.meanings];
                   const meaning = { ...newMeanings[meaningIndex] }; // Create a copy
                   
+                  // Fix: Ensure srs_level is treated as a number before performing arithmetic.
+                  // Data from localStorage can be malformed, causing type errors.
+                  const currentSrsLevel = Number(meaning.srs_level) || 0;
+                  
                   if (isCorrect) {
                       // Increase SRS level, maxing out at the highest defined interval
-                      meaning.srs_level = Math.min(meaning.srs_level + 1, srsIntervalsHours.length);
+                      meaning.srs_level = Math.min(currentSrsLevel + 1, srsIntervalsHours.length);
                       const intervalHours = srsIntervalsHours[meaning.srs_level - 1];
                       meaning.next_review_date = Date.now() + intervalHours * 60 * 60 * 1000;
                   } else {
                       // Decrease SRS level, but not below 0
-                      meaning.srs_level = Math.max(0, meaning.srs_level - 1);
+                      meaning.srs_level = Math.max(0, currentSrsLevel - 1);
                       // Schedule for review soon
                       meaning.next_review_date = Date.now() + 5 * 60 * 1000; // 5 minutes from now
                   }
@@ -904,7 +908,6 @@ const App: React.FC = () => {
       };
 
       try {
-        console.log("Api_Key", process.env.API_KEY);
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         const systemInstruction = `You are an expert linguist and teacher who helps Arabic speakers learn English. For a given English word, provide a JSON object with its most common meanings, tailored for an A2-level learner. The output must strictly adhere to the provided JSON schema. Do not output anything other than the JSON object.`;
