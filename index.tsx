@@ -904,6 +904,7 @@ const App: React.FC = () => {
       };
 
       try {
+        console.log("Api_Key", process.env.API_KEY);
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         const systemInstruction = `You are an expert linguist and teacher who helps Arabic speakers learn English. For a given English word, provide a JSON object with its most common meanings, tailored for an A2-level learner. The output must strictly adhere to the provided JSON schema. Do not output anything other than the JSON object.`;
@@ -953,6 +954,7 @@ const App: React.FC = () => {
         inputRef.current?.focus();
       } catch (e: any) {
         handleApiError(e);
+        console.log("Error",e);
         throw e; // Re-throw so the calling function can handle loading state.
       }
   };
