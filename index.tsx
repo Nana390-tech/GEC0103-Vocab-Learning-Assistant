@@ -14,6 +14,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI, Type } from '@google/genai';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // --- TYPE DEFINITIONS ---
 
@@ -587,6 +588,81 @@ const ReviewSession: React.FC<{ items: ReviewItem[]; onClose: () => void; onQuiz
     );
 };
 
+const ProgressDashboard: React.FC<{
+    totalWords: number;
+    wordsForReview: number;
+    masteredWords: number;
+    inProgressWords: number;
+    currentTheme: Theme;
+}> = ({ totalWords, wordsForReview, masteredWords, inProgressWords, currentTheme }) => {
+
+    const data = [
+        { name: 'Mastered', value: masteredWords },
+        { name: 'In Progress', value: inProgressWords },
+    ];
+    
+    const themeColors = themes.find(t => t.id === currentTheme)?.colors;
+    // A fallback is good practice in case the theme isn't found.
+    const COLORS = [themeColors?.secondary || '#90BE6D', themeColors?.primary || '#2D7DD2'];
+
+    if (totalWords === 0) return null;
+
+    return (
+        <motion.div 
+            className="progress-dashboard"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+        >
+            <h3>My Learning Progress</h3>
+            <div className="stats-container">
+                <div className="stat-item">
+                    <div className="stat-value">{totalWords}</div>
+                    <div className="stat-label">Total Words Learned</div>
+                </div>
+                 <div className="stat-item">
+                    <div className="stat-value">{wordsForReview}</div>
+                    <div className="stat-label">Words for Review</div>
+                </div>
+            </div>
+            <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Pie
+                            data={data}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={70}
+                            fill="#8884d8"
+                            paddingAngle={5}
+                            dataKey="value"
+                            labelLine={false}
+                            label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+                                if (percent === 0) return '';
+                                const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                const x = cx + radius * Math.cos(-midAngle * Math.PI / 180);
+                                const y = cy + radius * Math.sin(-midAngle * Math.PI / 180);
+                                return (
+                                    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="14px" fontWeight="bold">
+                                        {`${(percent * 100).toFixed(0)}%`}
+                                    </text>
+                                );
+                            }}
+                        >
+                            {data.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend iconType="circle" />
+                    </PieChart>
+                </ResponsiveContainer>
+            </div>
+        </motion.div>
+    );
+};
+
 const App: React.FC = () => {
   const [vocabList, setVocabList] = useState<VocabData[]>([]);
   const [word, setWord] = useState('');
@@ -751,6 +827,29 @@ const App: React.FC = () => {
     const now = Date.now();
     return vocabList.reduce((count, item) => 
       count + item.meanings.filter(m => m.next_review_date <= now).length, 0);
+  }, [vocabList]);
+
+  const { masteredWords, inProgressWords } = useMemo(() => {
+    if (vocabList.length === 0) {
+        return { masteredWords: 0, inProgressWords: 0 };
+    }
+    
+    // A word is "mastered" if all its meanings have an SRS level of 6 or higher.
+    const MASTERY_THRESHOLD = 6;
+    
+    let mastered = 0;
+    
+    vocabList.forEach(word => {
+        const isMastered = word.meanings.every(meaning => meaning.srs_level >= MASTERY_THRESHOLD);
+        if (isMastered) {
+            mastered++;
+        }
+    });
+
+    return {
+        masteredWords: mastered,
+        inProgressWords: vocabList.length - mastered,
+    };
   }, [vocabList]);
 
   const fetchVocabData = async (wordToLearn: string) => {
@@ -966,6 +1065,16 @@ const App: React.FC = () => {
                     Review ({wordsForReviewCount})
                 </button>
             </div>
+
+            {vocabList.length > 0 && (
+                <ProgressDashboard
+                    totalWords={vocabList.length}
+                    wordsForReview={wordsForReviewCount}
+                    masteredWords={masteredWords}
+                    inProgressWords={inProgressWords}
+                    currentTheme={theme}
+                />
+            )}
 
             <div className="vocab-list">
                 <AnimatePresence>

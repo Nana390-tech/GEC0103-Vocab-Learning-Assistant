@@ -863,6 +863,59 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
     100% { transform: scale(1); }
 }
 
+/* --- NEW Progress Dashboard --- */
+.progress-dashboard {
+    background-color: var(--card-background);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 1rem;
+    align-items: center;
+}
+.progress-dashboard h3 {
+    grid-column: 1 / -1; /* Span across both columns */
+    margin-bottom: 1rem;
+    text-align: center;
+    color: var(--text-color);
+    font-size: 1.25rem;
+}
+.stats-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1.5rem;
+    padding: 1rem 0;
+}
+.stat-item {
+    text-align: center;
+}
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    line-height: 1;
+}
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--text-light);
+    margin-top: 0.25rem;
+}
+.chart-container {
+    min-height: 180px; /* Ensure chart has space */
+}
+/* Make recharts text adopt theme colors */
+.recharts-legend-item-text {
+  color: var(--text-light) !important;
+  vertical-align: middle !important;
+}
+.recharts-tooltip-label {
+  color: var(--text-light) !important;
+}
+
 
 /* --- NEW APP FOOTER --- */
 .app-footer {
@@ -873,6 +926,16 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
 }
 
 /* --- RESPONSIVENESS --- */
+@media (max-width: 600px) {
+    .progress-dashboard {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto;
+        text-align: center;
+    }
+    .chart-container {
+      margin-top: 1rem;
+    }
+}
 @media (max-width: 480px) {
     .mc-options {
         grid-template-columns: 1fr; /* Stack options on mobile */
