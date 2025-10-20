@@ -752,15 +752,32 @@ const App: React.FC = () => {
   }, [theme]);
   
   const handleApiError = (e: any) => {
-    console.error("API Error:", e);
-    const message = e?.message || '';
+    console.error("API Error Details:", e);
+    const message = e?.message?.toLowerCase() || '';
 
-    if (message.includes("API key") || message.includes("API Key") || message.includes("was not found")) {
-        setError("There was a problem connecting to the learning service due to a configuration issue. Please try again later.");
-    } else {
-        const friendlyMessage = `Oops! An error occurred: ${message || 'Please try again later.'}`;
-        setError(friendlyMessage);
+    let userFriendlyError = "An unexpected error occurred. Please try again later.";
+
+    if (message.includes('api key') || message.includes('was not found')) {
+        userFriendlyError = "Configuration error. Could not connect to the learning service.";
+    } else if (message.includes('failed to fetch') || e instanceof TypeError) {
+        userFriendlyError = "Network error. Please check your internet connection and try again.";
+    } else if (message.includes('took too long to respond')) {
+        userFriendlyError = "The request timed out. Please check your connection or try a different word.";
+    } else if (message.includes("couldn't find a definition for")) {
+        // This is a custom error we throw, so we can use its message directly.
+        userFriendlyError = e.message;
+    } else if (message.includes('unexpected response')) {
+        // Another custom error for parsing issues.
+        userFriendlyError = e.message;
+    } else if (message.includes('400 bad request')) {
+        // Gemini can send this for invalid requests (e.g., malformed schema, unsupported word)
+        userFriendlyError = "The word might be invalid or unsupported. Please try another word.";
+    } else if (message.includes('500') || message.includes('503')) {
+        // Server errors
+        userFriendlyError = "The learning service is currently unavailable. Please try again later.";
     }
+
+    setError(userFriendlyError);
   };
 
   const handleQuizComplete = (wordId: string, meaningIndex: number, isCorrect: boolean) => {
@@ -957,7 +974,6 @@ const App: React.FC = () => {
         inputRef.current?.focus();
       } catch (e: any) {
         handleApiError(e);
-        console.log("Error",e);
         throw e; // Re-throw so the calling function can handle loading state.
       }
   };
