@@ -542,16 +542,24 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
   margin-bottom: 0.5rem;
   height: 24px;
 }
-.reread-link {
-    background: none;
-    border: none;
-    color: var(--primary-color);
-    text-decoration: underline;
-    font-size: 0.9rem;
-    font-weight: 700;
+.back-to-practice-btn {
+    margin-top: 1rem;
+    padding: 0.7rem 1.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-background);
     cursor: pointer;
-    margin-top: 0.5rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    color: var(--text-color);
+    font-size: 0.9rem;
 }
+
+.back-to-practice-btn:hover {
+    background-color: var(--neutral-bg-color);
+    border-color: var(--text-light);
+}
+
 
 /* Flashcard */
 .flashcard-container {

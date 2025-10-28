@@ -55,6 +55,11 @@ interface ReviewItem {
     wordId: string;
 }
 
+interface QuizResult {
+    isCorrect: boolean;
+    correctAnswer: string;
+}
+
 type Theme = 'violet-yellow' | 'blue-green' | 'monochromatic';
 
 interface ThemeOption {
@@ -163,15 +168,15 @@ const ThemeSelector: React.FC<{ currentTheme: Theme; onThemeChange: (theme: Them
     </div>
 );
 
-const FeedbackAnimation: React.FC<{ isCorrect: boolean; onReread: () => void; }> = ({ isCorrect, onReread }) => {
+const FeedbackAnimation: React.FC<{ result: QuizResult; onRetry: () => void; }> = ({ result, onRetry }) => {
     return (
         <motion.div
-            className={`feedback-animation-container ${isCorrect ? 'correct' : 'incorrect'}`}
+            className={`feedback-animation-container ${result.isCorrect ? 'correct' : 'incorrect'}`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
         >
-            {isCorrect ? (
+            {result.isCorrect ? (
                 <>
                     <div className="stars-container">
                         {[...Array(3)].map((_, i) => (
@@ -184,9 +189,9 @@ const FeedbackAnimation: React.FC<{ isCorrect: boolean; onReread: () => void; }>
                 </>
             ) : (
                 <>
-                    <p>Not quite. Give it another try!</p>
-                    <button onClick={onReread} className="reread-link">
-                        Review the definition again?
+                    <p>Not quite. The correct answer is "<strong>{result.correctAnswer}</strong>".</p>
+                    <button onClick={onRetry} className="back-to-practice-btn">
+                        ← Back to Practice Options
                     </button>
                 </>
             )}
@@ -194,16 +199,28 @@ const FeedbackAnimation: React.FC<{ isCorrect: boolean; onReread: () => void; }>
     );
 };
 
-const GapFillQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
+const GapFillQuiz: React.FC<{ meaning: Meaning; onComplete: (result: QuizResult) => void; }> = ({ meaning, onComplete }) => {
     const [answer, setAnswer] = useState('');
-    const [feedback, setFeedback] = useState<{ isCorrect: boolean } | null>(null);
-    const wordToGuess = meaning.gap_fill_full_sentence.replace(meaning.gap_fill_prompt, '').replace(/\.$/, '').trim();
+
+    const promptParts = meaning.gap_fill_prompt.split('___');
+    const prefix = promptParts[0] || '';
+    const suffix = promptParts.length > 1 ? (promptParts[1] || '') : null;
+
+    let wordToGuess = meaning.gap_fill_full_sentence;
+    if (wordToGuess.toLowerCase().startsWith(prefix.toLowerCase())) {
+        wordToGuess = wordToGuess.substring(prefix.length);
+    }
+    if (suffix !== null && wordToGuess.toLowerCase().endsWith(suffix.toLowerCase())) {
+        wordToGuess = wordToGuess.substring(0, wordToGuess.length - suffix.length);
+    }
+    wordToGuess = wordToGuess.trim().replace(/[.,!?;:]+$/, '');
+
 
     const handleSubmit = () => {
-        if (!answer.trim()) return;
-        const isCorrect = answer.trim().toLowerCase() === wordToGuess.toLowerCase();
-        setFeedback({ isCorrect });
-        onComplete(isCorrect);
+        const userAnswer = answer.trim();
+        if (!userAnswer) return;
+        const isCorrect = userAnswer.toLowerCase() === wordToGuess.toLowerCase();
+        onComplete({ isCorrect, correctAnswer: wordToGuess });
     };
 
     return (
@@ -216,29 +233,19 @@ const GapFillQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) =
                     onChange={(e) => setAnswer(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                     placeholder="Type the word"
-                    disabled={!!feedback}
                 />
-                <button onClick={handleSubmit} disabled={!!feedback}>Check</button>
+                <button onClick={handleSubmit}>Check</button>
             </div>
-            {feedback && (
-                <div className={`quiz-feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}`}>
-                    <strong>{feedback.isCorrect ? 'Correct!' : 'Not quite.'}</strong>
-                    <p>The full sentence is: "{meaning.gap_fill_full_sentence}"</p>
-                    <p style={{ fontFamily: "'Noto Sans Arabic', sans-serif", textAlign: 'right' }}>{meaning.gap_fill_full_sentence_arabic}</p>
-                </div>
-            )}
         </div>
     );
 };
 
-const MultipleChoiceQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
-    const [answer, setAnswer] = useState<{ selected: string, isCorrect: boolean } | null>(null);
+const MultipleChoiceQuiz: React.FC<{ meaning: Meaning; onComplete: (result: QuizResult) => void; }> = ({ meaning, onComplete }) => {
     const options = useMemo(() => [...meaning.multiple_choice.options].sort(() => Math.random() - 0.5), [meaning.multiple_choice.options]);
 
     const handleAnswer = (option: string) => {
         const isCorrect = option === meaning.multiple_choice.correct_answer;
-        setAnswer({ selected: option, isCorrect });
-        onComplete(isCorrect);
+        onComplete({ isCorrect, correctAnswer: meaning.multiple_choice.correct_answer });
     };
 
     return (
@@ -248,38 +255,28 @@ const MultipleChoiceQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boo
                 {options.map(option => (
                     <button
                         key={option}
-                        className={`mc-option ${answer && (option === meaning.multiple_choice.correct_answer ? 'correct' : (option === answer.selected ? 'incorrect' : ''))}`}
+                        className="mc-option"
                         onClick={() => handleAnswer(option)}
-                        disabled={!!answer}
                     >
                         {option}
                     </button>
                 ))}
             </div>
-            {answer && (
-                <div className={`quiz-feedback ${answer.isCorrect ? 'correct' : 'incorrect'}`}>
-                    <strong>{answer.isCorrect ? 'Correct!' : 'Incorrect.'}</strong> The correct answer is "{meaning.multiple_choice.correct_answer}".
-                    <p>Full sentence: "{meaning.multiple_choice_full_sentence}"</p>
-                    <p style={{ fontFamily: "'Noto Sans Arabic', sans-serif", textAlign: 'right' }}>{meaning.multiple_choice_full_sentence_arabic}</p>
-                </div>
-            )}
         </div>
     );
 };
 
-const FlashcardQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = ({ meaning, onComplete }) => {
+const FlashcardQuiz: React.FC<{ meaning: Meaning; onComplete: (result: QuizResult) => void; }> = ({ meaning, onComplete }) => {
     const [isFlipped, setIsFlipped] = useState(false);
-    const [isAssessed, setIsAssessed] = useState(false);
 
     const handleAssess = (isCorrect: boolean) => {
-        setIsAssessed(true);
-        onComplete(isCorrect);
+        onComplete({ isCorrect, correctAnswer: meaning.multiple_choice.correct_answer });
     };
 
     return (
         <div className="quiz-content">
             <p>Read the definition below. Can you remember the English word? Click to flip.</p>
-            <div className="flashcard-container" onClick={() => !isAssessed && setIsFlipped(!isFlipped)}>
+            <div className="flashcard-container" onClick={() => setIsFlipped(!isFlipped)}>
                 <div className={`flashcard ${isFlipped ? 'is-flipped' : ''}`}>
                     <div className="flashcard-face flashcard-front">
                         <p className="one-word-ar">{meaning.one_word_arabic}</p>
@@ -290,7 +287,7 @@ const FlashcardQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean)
                     </div>
                 </div>
             </div>
-            {isFlipped && !isAssessed && (
+            {isFlipped && (
                 <motion.div
                     className="flashcard-assessment"
                     initial={{ opacity: 0, y: 10 }}
@@ -307,24 +304,21 @@ const FlashcardQuiz: React.FC<{ meaning: Meaning; onComplete: (correct: boolean)
 
 const QuizContainer: React.FC<{ meaning: Meaning; onComplete: (correct: boolean) => void; }> = React.memo(({ meaning, onComplete }) => {
     const [quizType, setQuizType] = useState<'gap-fill' | 'multiple-choice' | 'flashcard'>('gap-fill');
-    const [isComplete, setIsComplete] = useState(false);
-    const [wasCorrect, setWasCorrect] = useState(false);
+    const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Reset state when the word/meaning changes
     useEffect(() => {
-        setIsComplete(false);
-        setWasCorrect(false);
+        setQuizResult(null);
         setQuizType('gap-fill');
     }, [meaning]);
 
-    const handleQuizComplete = (correct: boolean) => {
-        setIsComplete(true);
-        setWasCorrect(correct);
-        onComplete(correct); // Pass result to parent
+    const handleQuizComplete = (result: QuizResult) => {
+        setQuizResult(result);
+        onComplete(result.isCorrect);
     };
 
-    const scrollToTop = () => {
+    const handleRetry = () => {
+        setQuizResult(null);
         containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
@@ -334,8 +328,8 @@ const QuizContainer: React.FC<{ meaning: Meaning; onComplete: (correct: boolean)
                 <QuizIcon />
                 <h3>Practice This Meaning</h3>
             </div>
-            {isComplete ? (
-                <FeedbackAnimation isCorrect={wasCorrect} onReread={scrollToTop} />
+            {quizResult ? (
+                <FeedbackAnimation result={quizResult} onRetry={handleRetry} />
             ) : (
                 <>
                     <div className="quiz-type-selector">
@@ -1102,7 +1096,12 @@ const App: React.FC = () => {
                     <VocabCard
                         key={vocab.id}
                         vocab={vocab}
-                        handleQuizComplete={(meaningIndex, isCorrect) => handleQuizComplete(vocab.id, meaningIndex, isCorrect)}
+                        handleQuizComplete={(meaningIndex, isCorrect) => {
+                            // No-op: The initial practice quiz on a newly-learned word does not
+                            // update the Spaced Repetition System (SRS) schedule. SRS data is only 
+                            // updated during a dedicated "Review Session". This ensures that all new 
+                            // words are immediately available for review.
+                        }}
                     />
                     ))}
                 </AnimatePresence>
