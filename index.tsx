@@ -404,15 +404,14 @@ const WordListModal: React.FC<{ vocabList: VocabData[]; onClose: () => void; }> 
     const handlePrint = () => window.print();
 
     const handleExport = () => {
-        let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "Word,Part of Speech,Arabic Translation,Arabic Explanation,Example (English),Example (Arabic)\r\n";
+        let csvContent = "Word,Part of Speech,Arabic Translation,Arabic Explanation,Example (English),Example (Arabic)\r\n";
 
         vocabList.forEach(item => {
             item.meanings.forEach(m => {
                 const row = [
-                    `"${item.word}"`,
-                    `"${m.part_of_speech_english}"`,
-                    `"${m.one_word_arabic}"`,
+                    `"${item.word.replace(/"/g, '""')}"`,
+                    `"${m.part_of_speech_english.replace(/"/g, '""')}"`,
+                    `"${m.one_word_arabic.replace(/"/g, '""')}"`,
                     `"${m.explanation_arabic.replace(/"/g, '""')}"`,
                     `"${m.example_sentence_english.replace(/"/g, '""')}"`,
                     `"${m.example_sentence_arabic.replace(/"/g, '""')}"`
@@ -421,13 +420,20 @@ const WordListModal: React.FC<{ vocabList: VocabData[]; onClose: () => void; }> 
             });
         });
 
-        const encodedUri = encodeURI(csvContent);
+        // Add UTF-8 BOM for Excel to recognize Arabic characters correctly
+        const bom = "\uFEFF";
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
+        link.setAttribute("href", url);
         link.setAttribute("download", "vocab_list.csv");
         document.body.appendChild(link);
         link.click();
+        
+        // Clean up
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     return (

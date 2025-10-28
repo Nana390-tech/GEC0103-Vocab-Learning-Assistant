@@ -965,8 +965,18 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
 
 /* Print Styles */
 @media print {
-  body > *:not(.modal-overlay) {
-    display: none;
+  body {
+    background-color: white !important;
+  }
+
+  /* Hide everything on the page by default, then selectively show the print content */
+  body > #root > *:not(.modal-overlay) {
+    display: none !important;
+  }
+  
+  /* Hide modals that are NOT the word list modal */
+  .modal-overlay:not(:has(.word-table)) {
+    display: none !important;
   }
 
   .modal-overlay {
@@ -976,6 +986,7 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
     backdrop-filter: none !important;
     padding: 0 !important;
     display: block !important;
+    animation: none !important;
   }
 
   .modal-content {
@@ -988,6 +999,8 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
     max-height: none !important;
     padding: 0 !important;
     display: block !important;
+    transform: none !important;
+    animation: none !important;
   }
 
   .modal-header, .modal-footer {
@@ -1002,6 +1015,10 @@ body.theme-monochromatic .quiz-feedback.correct { --success-color_10: rgba(25, 1
     font-size: 12pt;
     width: 100%;
     border-collapse: collapse;
+  }
+
+  .word-table tr {
+    page-break-inside: avoid;
   }
 
   .word-table th, .word-table td {
